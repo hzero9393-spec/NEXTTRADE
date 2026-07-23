@@ -1,0 +1,867 @@
+     1→'use client'
+     2→
+     3→import { useState, useEffect, useRef, useCallback } from 'react'
+     4→import { useAuthStore } from '@/lib/auth-store'
+     5→import { Input } from '@/components/ui/input'
+     6→import { Label } from '@/components/ui/label'
+     7→import { TrendingUp, Mail, Lock, User, Phone, ArrowRight, Eye, EyeOff, BarChart3, Shield, Zap } from 'lucide-react'
+     8→
+     9→// Google SVG icon component
+    10→function GoogleIcon({ className }: { className?: string }) {
+    11→  return (
+    12→    <svg className={className} viewBox="0 0 24 24">
+    13→      <path
+    14→        d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"
+    15→        fill="#4285F4"
+    16→      />
+    17→      <path
+    18→        d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+    19→        fill="#34A853"
+    20→      />
+    21→      <path
+    22→        d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
+    23→        fill="#FBBC05"
+    24→      />
+    25→      <path
+    26→        d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+    27→        fill="#EA4335"
+    28→      />
+    29→    </svg>
+    30→  )
+    31→}
+    32→import { motion, AnimatePresence } from 'framer-motion'
+    33→
+    34→type AuthMode = 'login' | 'signup'
+    35→
+    36→export function AuthPage() {
+    37→  const [mode, setMode] = useState<AuthMode>('login')
+    38→  const [showPassword, setShowPassword] = useState(false)
+    39→  const [isLoading, setIsLoading] = useState(false)
+    40→  const [error, setError] = useState('')
+    41→  const [success, setSuccess] = useState('')
+    42→  const [googleAvailable, setGoogleAvailable] = useState(false)
+    43→  const [googleChecked, setGoogleChecked] = useState(false)
+    44→  const [googleClientId, setGoogleClientId] = useState('')
+    45→  const [googleLoading, setGoogleLoading] = useState(false)
+    46→  const googleButtonRef = useRef<HTMLDivElement>(null)
+    47→  const gisScriptLoaded = useRef(false)
+    48→
+    49→  // Form fields
+    50→  const [name, setName] = useState('')
+    51→  const [email, setEmail] = useState('')
+    52→  const [phone, setPhone] = useState('')
+    53→  const [password, setPassword] = useState('')
+    54→  const [confirmPassword, setConfirmPassword] = useState('')
+    55→
+    56→  const { setAuth } = useAuthStore()
+    57→
+    58→  // Check for OAuth error from URL params
+    59→  useEffect(() => {
+    60→    const params = new URLSearchParams(window.location.search)
+    61→    const authError = params.get('auth_error')
+    62→    const authDetails = params.get('details')
+    63→    if (authError) {
+    64→      const errorMessages: Record<string, string> = {
+    65→        google_denied: 'Google sign-in was cancelled.',
+    66→        no_code: 'Google authentication failed. Please try again.',
+    67→        google_not_configured: 'Google Sign-In is not configured yet. Please use email/password to sign in.',
+    68→        token_exchange_failed: 'Failed to authenticate with Google. Please try again.',
+    69→        user_info_failed: 'Failed to get your Google profile. Please try again.',
+    70→        account_deactivated: 'Your account has been deactivated. Please contact support.',
+    71→        oauth_callback_failed: 'Something went wrong during Google sign-in. Please try again.',
+    72→        db_query_failed: 'Database connection error. Please try again later.',
+    73→        session_create_failed: 'Failed to create session. Please try again.',
+    74→        token_generation_failed: 'Authentication token error. Please try again.',
+    75→      }
+    76→      let msg = errorMessages[authError] || 'Authentication failed. Please try again.'
+    77→      // Append debug details if available (helps with troubleshooting)
+    78→      if (authDetails) {
+    79→        msg += ` (${authDetails})`
+    80→      }
+    81→      setError(msg)
+    82→      // Clean URL
+    83→      window.history.replaceState({}, document.title, window.location.pathname)
+    84→    }
+    85→  }, [])
+    86→
+    87→  // Handle Google GIS credential response
+    88→  const handleCredentialResponse = useCallback(async (response: CredentialResponse) => {
+    89→    try {
+    90→      setGoogleLoading(true)
+    91→      setError('')
+    92→      const res = await fetch('/api/auth/google', {
+    93→        method: 'POST',
+    94→        headers: { 'Content-Type': 'application/json' },
+    95→        body: JSON.stringify({ credential: response.credential }),
+    96→      })
+    97→      const data = await res.json()
+    98→      if (!res.ok) {
+    99→        setError(data.error || 'Google sign-in failed')
+   100→        return
+   101→      }
+   102→      setAuth(data.user, data.token)
+   103→    } catch {
+   104→      setError('Network error during Google sign-in. Please try again.')
+   105→    } finally {
+   106→      setGoogleLoading(false)
+   107→    }
+   108→  }, [setAuth])
+   109→
+   110→  // Load Google Identity Services script
+   111→  useEffect(() => {
+   112→    if (!googleClientId || gisScriptLoaded.current) return
+   113→
+   114→    const existingScript = document.querySelector('script[src="https://accounts.google.com/gsi/client"]')
+   115→    if (existingScript) {
+   116→      gisScriptLoaded.current = true
+   117→      return
+   118→    }
+   119→
+   120→    const script = document.createElement('script')
+   121→    script.src = 'https://accounts.google.com/gsi/client'
+   122→    script.async = true
+   123→    script.defer = true
+   124→    document.head.appendChild(script)
+   125→    gisScriptLoaded.current = true
+   126→  }, [googleClientId])
+   127→
+   128→  // Initialize Google GIS when script loads and client ID is available
+   129→  useEffect(() => {
+   130→    if (!googleClientId || !gisScriptLoaded.current) return
+   131→
+   132→    const initGIS = () => {
+   133→      if (typeof window !== 'undefined' && window.google?.accounts?.id) {
+   134→        window.google.accounts.id.initialize({
+   135→          client_id: googleClientId,
+   136→          callback: handleCredentialResponse,
+   137→          cancel_on_tap_outside: true,
+   138→          context: 'signin',
+   139→        })
+   140→      }
+   141→    }
+   142→
+   143→    // Try immediately, or wait for script to load
+   144→    if (window.google?.accounts?.id) {
+   145→      initGIS()
+   146→    } else {
+   147→      // Wait for the GIS script to load
+   148→      const checkInterval = setInterval(() => {
+   149→        if (window.google?.accounts?.id) {
+   150→          clearInterval(checkInterval)
+   151→          initGIS()
+   152→        }
+   153→      }, 100)
+   154→      // Cleanup after 10s if script doesn't load
+   155→      const timeout = setTimeout(() => clearInterval(checkInterval), 10000)
+   156→      return () => {
+   157→        clearInterval(checkInterval)
+   158→        clearTimeout(timeout)
+   159→      }
+   160→    }
+   161→  }, [googleClientId, handleCredentialResponse])
+   162→
+   163→  // Check if Google OAuth is configured
+   164→  useEffect(() => {
+   165→    fetch('/api/auth/google/status')
+   166→      .then(res => res.json())
+   167→      .then(data => {
+   168→        setGoogleAvailable(data.configured)
+   169→        setGoogleClientId(data.clientId || '')
+   170→        setGoogleChecked(true)
+   171→      })
+   172→      .catch(() => {
+   173→        setGoogleAvailable(false)
+   174→        setGoogleChecked(true)
+   175→      })
+   176→  }, [])
+   177→
+   178→  const handleGoogleSignIn = () => {
+   179→    // If Google OAuth is not configured, show error
+   180→    if (!googleAvailable) {
+   181→      setError('Google Sign-In is not configured. Please use email/password to sign in.')
+   182→      return
+   183→    }
+   184→    // Use Google Identity Services (GIS) popup flow
+   185→    if (typeof window !== 'undefined' && window.google?.accounts?.id) {
+   186→      // Render button in hidden div, then trigger prompt
+   187→      if (googleButtonRef.current) {
+   188→        window.google.accounts.id.renderButton(googleButtonRef.current, {
+   189→          theme: 'outline',
+   190→          size: 'large',
+   191→          text: 'continue_with',
+   192→          shape: 'rectangular',
+   193→          width: googleButtonRef.current.offsetWidth,
+   194→        })
+   195→        // Trigger the Google sign-in prompt
+   196→        const btn = googleButtonRef.current.querySelector('div[role="button"]') as HTMLElement
+   197→        if (btn) {
+   198→          btn.click()
+   199→          return
+   200→        }
+   201→      }
+   202→      // Fallback: use prompt
+   203→      window.google.accounts.id.prompt()
+   204→    } else {
+   205→      // Fallback: redirect to server-side OAuth
+   206→      window.location.href = '/api/auth/google'
+   207→    }
+   208→  }
+   209→
+   210→  const resetForm = () => {
+   211→    setName('')
+   212→    setEmail('')
+   213→    setPhone('')
+   214→    setPassword('')
+   215→    setConfirmPassword('')
+   216→    setError('')
+   217→    setSuccess('')
+   218→    setShowPassword(false)
+   219→  }
+   220→
+   221→  const switchMode = (newMode: AuthMode) => {
+   222→    resetForm()
+   223→    setMode(newMode)
+   224→  }
+   225→
+   226→  const handleLogin = async (e: React.FormEvent) => {
+   227→    e.preventDefault()
+   228→    setError('')
+   229→    setIsLoading(true)
+   230→
+   231→    try {
+   232→      const response = await fetch('/api/auth/login', {
+   233→        method: 'POST',
+   234→        headers: { 'Content-Type': 'application/json' },
+   235→        body: JSON.stringify({ email, password }),
+   236→      })
+   237→
+   238→      const data = await response.json()
+   239→
+   240→      if (!response.ok) {
+   241→        setError(data.error || 'Login failed')
+   242→        return
+   243→      }
+   244→
+   245→      setAuth(data.user, data.token)
+   246→    } catch {
+   247→      setError('Network error. Please check your connection.')
+   248→    } finally {
+   249→      setIsLoading(false)
+   250→    }
+   251→  }
+   252→
+   253→  const handleSignup = async (e: React.FormEvent) => {
+   254→    e.preventDefault()
+   255→    setError('')
+   256→    setSuccess('')
+   257→
+   258→    // Validate
+   259→    if (password !== confirmPassword) {
+   260→      setError('Passwords do not match')
+   261→      return
+   262→    }
+   263→
+   264→    if (password.length < 6) {
+   265→      setError('Password must be at least 6 characters')
+   266→      return
+   267→    }
+   268→
+   269→    setIsLoading(true)
+   270→
+   271→    try {
+   272→      const response = await fetch('/api/auth/register', {
+   273→        method: 'POST',
+   274→        headers: { 'Content-Type': 'application/json' },
+   275→        body: JSON.stringify({ name, email, phone: phone || undefined, password }),
+   276→      })
+   277→
+   278→      const data = await response.json()
+   279→
+   280→      if (!response.ok) {
+   281→        setError(data.error || 'Registration failed')
+   282→        return
+   283→      }
+   284→
+   285→      setAuth(data.user, data.token)
+   286→    } catch {
+   287→      setError('Network error. Please check your connection.')
+   288→    } finally {
+   289→      setIsLoading(false)
+   290→    }
+   291→  }
+   292→
+   293→  const getPasswordStrength = (pwd: string): { level: number; color: string; label: string; textColor: string } => {
+   294→    if (pwd.length === 0) return { level: 0, color: '', label: '', textColor: '' }
+   295→    if (pwd.length < 4) return { level: 1, color: 'bg-[#eb5b3c]', label: 'Weak', textColor: 'text-[#eb5b3c]' }
+   296→    if (pwd.length < 6) return { level: 2, color: 'bg-[#eb5b3c]', label: 'Fair', textColor: 'text-[#eb5b3c]' }
+   297→    if (pwd.length < 8) return { level: 3, color: 'bg-[#f59e0b]', label: 'Good', textColor: 'text-[#f59e0b]' }
+   298→    if (pwd.length < 10) return { level: 4, color: 'bg-[#22c55e]', label: 'Strong', textColor: 'text-[#22c55e]' }
+   299→    return { level: 4, color: 'bg-[#22c55e]', label: 'Very Strong', textColor: 'text-[#22c55e]' }
+   300→  }
+   301→
+   302→  const features = [
+   303→    {
+   304→      icon: BarChart3,
+   305→      title: 'Live Market Data',
+   306→      desc: 'NIFTY, BANKNIFTY, SENSEX with real-time option chain',
+   307→    },
+   308→    {
+   309→      icon: Shield,
+   310→      title: 'Zero Risk Practice',
+   311→      desc: 'Trade with ₹1,00,000 virtual money — learn without losing',
+   312→    },
+   313→    {
+   314→      icon: Zap,
+   315→      title: 'F&O Trading',
+   316→      desc: 'Practice futures & options with Indian market lot sizes',
+   317→    },
+   318→  ]
+   319→
+   320→  const stats = [
+   321→    { value: '50+', label: 'NSE Stocks' },
+   322→    { value: '5', label: 'Indices' },
+   323→    { value: '₹1L', label: 'Virtual Cash' },
+   324→  ]
+   325→
+   326→  return (
+   327→    <div className="min-h-screen flex bg-card">
+   328→      {/* Left Panel - Branding & Features (desktop only) */}
+   329→      <div className="hidden lg:flex lg:w-[52%] relative overflow-hidden bg-card">
+   330→        {/* Subtle blue gradient accent - top right */}
+   331→        <div
+   332→          className="absolute top-0 right-0 w-[600px] h-[600px] opacity-[0.07]"
+   333→          style={{
+   334→            background: 'radial-gradient(circle at top right, #00D09C 0%, transparent 65%)',
+   335→          }}
+   336→        />
+   337→        {/* Subtle blue gradient accent - bottom left */}
+   338→        <div
+   339→          className="absolute bottom-0 left-0 w-[500px] h-[500px] opacity-[0.05]"
+   340→          style={{
+   341→            background: 'radial-gradient(circle at bottom left, #00D09C 0%, transparent 65%)',
+   342→          }}
+   343→        />
+   344→        {/* Thin decorative line pattern */}
+   345→        <svg className="absolute inset-0 w-full h-full opacity-[0.03]" xmlns="http://www.w3.org/2000/svg">
+   346→          <defs>
+   347→            <pattern id="auth-grid" width="48" height="48" patternUnits="userSpaceOnUse">
+   348→              <path d="M 48 0 L 0 0 0 48" fill="none" stroke="#00D09C" strokeWidth="0.5" />
+   349→            </pattern>
+   350→          </defs>
+   351→          <rect width="100%" height="100%" fill="url(#auth-grid)" />
+   352→        </svg>
+   353→
+   354→        <div className="relative z-10 flex flex-col justify-center px-16 xl:px-20 w-full">
+   355→          {/* Logo */}
+   356→          <motion.div
+   357→            className="flex items-center gap-3 mb-14"
+   358→            initial={{ opacity: 0, y: 20 }}
+   359→            animate={{ opacity: 1, y: 0 }}
+   360→            transition={{ duration: 0.5 }}
+   361→          >
+   362→            <div className="flex size-11 items-center justify-center rounded-xl bg-[#00D09C]/10">
+   363→              <TrendingUp className="size-6 text-[#00D09C]" />
+   364→            </div>
+   365→            <div>
+   366→              <h1 className="text-[22px] font-bold text-foreground">Pepertect</h1>
+   367→            </div>
+   368→          </motion.div>
+   369→
+   370→          {/* Tagline */}
+   371→          <motion.div
+   372→            className="mb-14"
+   373→            initial={{ opacity: 0, y: 20 }}
+   374→            animate={{ opacity: 1, y: 0 }}
+   375→            transition={{ duration: 0.5, delay: 0.08 }}
+   376→          >
+   377→            <h2 className="text-[38px] font-bold leading-[1.2] text-foreground mb-4">
+   378→              Master Indian Markets<br />
+   379→              <span className="text-[#00D09C]">Before You Invest</span>
+   380→            </h2>
+   381→            <p className="text-muted-foreground text-[17px] leading-relaxed max-w-md">
+   382→              Practice trading with real market data. Build strategies, analyze options, and sharpen your skills — all risk-free.
+   383→            </p>
+   384→          </motion.div>
+   385→
+   386→          {/* Feature Cards */}
+   387→          <div className="space-y-5 mb-14">
+   388→            {features.map((feature, i) => (
+   389→              <motion.div
+   390→                key={feature.title}
+   391→                className="flex gap-4 items-start p-4 rounded-xl bg-card border border-border"
+   392→                initial={{ opacity: 0, x: -16 }}
+   393→                animate={{ opacity: 1, x: 0 }}
+   394→                transition={{ duration: 0.4, delay: 0.15 + i * 0.08 }}
+   395→              >
+   396→                <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-[#00D09C]/10">
+   397→                  <feature.icon className="size-[18px] text-[#00D09C]" />
+   398→                </div>
+   399→                <div>
+   400→                  <h3 className="font-semibold text-[15px] text-foreground mb-0.5">{feature.title}</h3>
+   401→                  <p className="text-muted-foreground text-[13px] leading-relaxed">{feature.desc}</p>
+   402→                </div>
+   403→              </motion.div>
+   404→            ))}
+   405→          </div>
+   406→
+   407→          {/* Stats Row */}
+   408→          <motion.div
+   409→            className="flex gap-4"
+   410→            initial={{ opacity: 0, y: 16 }}
+   411→            animate={{ opacity: 1, y: 0 }}
+   412→            transition={{ duration: 0.5, delay: 0.4 }}
+   413→          >
+   414→            {stats.map((stat) => (
+   415→              <div
+   416→                key={stat.label}
+   417→                className="flex-1 text-center py-4 px-3 rounded-xl bg-card border border-border"
+   418→              >
+   419→                <div className="text-[22px] font-bold text-[#00D09C]">{stat.value}</div>
+   420→                <div className="text-muted-foreground text-[12px] font-medium mt-0.5">{stat.label}</div>
+   421→              </div>
+   422→            ))}
+   423→          </motion.div>
+   424→        </div>
+   425→      </div>
+   426→
+   427→      {/* Right Panel - Auth Form */}
+   428→      <div className="flex-1 flex items-center justify-center p-5 sm:p-8 lg:p-10 bg-card">
+   429→        <motion.div
+   430→          className="w-full max-w-[420px]"
+   431→          initial={{ opacity: 0, y: 8 }}
+   432→          animate={{ opacity: 1, y: 0 }}
+   433→          transition={{ duration: 0.35 }}
+   434→        >
+   435→          {/* Mobile Logo */}
+   436→          <div className="flex items-center gap-2.5 mb-8 lg:hidden">
+   437→            <div className="flex size-9 items-center justify-center rounded-lg bg-[#00D09C]/10">
+   438→              <TrendingUp className="size-5 text-[#00D09C]" />
+   439→            </div>
+   440→            <span className="text-xl font-bold text-foreground">Pepertect</span>
+   441→          </div>
+   442→
+   443→          <AnimatePresence mode="wait">
+   444→            {mode === 'login' ? (
+   445→              <motion.div
+   446→                key="login"
+   447→                initial={{ opacity: 0, x: -8 }}
+   448→                animate={{ opacity: 1, x: 0 }}
+   449→                exit={{ opacity: 0, x: 8 }}
+   450→                transition={{ duration: 0.25 }}
+   451→              >
+   452→                {/* Login Card */}
+   453→                <div className="bg-card rounded-2xl border border-border shadow-[0_1px_3px_rgba(0,0,0,0.04)] p-7 sm:p-8">
+   454→                  <div className="mb-7">
+   455→                    <h2 className="text-[22px] font-bold text-foreground">Welcome back</h2>
+   456→                    <p className="text-muted-foreground text-[14px] mt-1">
+   457→                      Sign in to continue your trading journey
+   458→                    </p>
+   459→                  </div>
+   460→
+   461→                  <form onSubmit={handleLogin} className="space-y-5">
+   462→                    {/* Google Sign-In */}
+   463→                    {/* Hidden container for GIS rendered button */}
+   464→                    <div ref={googleButtonRef} className="hidden" aria-hidden="true" />
+   465→
+   466→                    <button
+   467→                      type="button"
+   468→                      onClick={handleGoogleSignIn}
+   469→                      disabled={googleLoading}
+   470→                      className="w-full h-[46px] text-[14px] font-medium rounded-lg bg-card text-foreground border border-border hover:bg-background hover:border-border transition-all duration-200 flex items-center justify-center gap-2.5 shadow-[0_1px_2px_rgba(0,0,0,0.04)] disabled:opacity-50 disabled:cursor-not-allowed"
+   471→                    >
+   472→                      {googleLoading ? (
+   473→                        <div className="flex items-center gap-2">
+   474→                          <div className="size-4 border-2 border-border/30 border-t-border rounded-full animate-spin" />
+   475→                          Connecting...
+   476→                        </div>
+   477→                      ) : (
+   478→                        <>
+   479→                          <GoogleIcon className="size-5" />
+   480→                          Continue with Google
+   481→                        </>
+   482→                      )}
+   483→                    </button>
+   484→
+   485→                    {/* Divider */}
+   486→                    <div className="relative flex items-center gap-3">
+   487→                      <div className="flex-1 h-px bg-muted" />
+   488→                      <span className="text-[12px] text-muted-foreground font-medium">or</span>
+   489→                      <div className="flex-1 h-px bg-muted" />
+   490→                    </div>
+   491→
+   492→                    {/* Email */}
+   493→                    <div className="space-y-1.5">
+   494→                      <Label htmlFor="login-email" className="text-foreground text-[13px] font-medium">
+   495→                        Email Address
+   496→                      </Label>
+   497→                      <div className="relative">
+   498→                        <Mail className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+   499→                        <Input
+   500→                          id="login-email"
+   501→                          type="email"
+   502→                          placeholder="you@example.com"
+   503→                          value={email}
+   504→                          onChange={(e) => setEmail(e.target.value)}
+   505→                          className="pl-10 h-[46px] text-foreground placeholder:text-muted-foreground bg-muted border-border rounded-lg text-[14px] focus-visible:border-[#00D09C] focus-visible:ring-[#00D09C]/15 focus-visible:bg-card"
+   506→                          required
+   507→                          autoComplete="email"
+   508→                        />
+   509→                      </div>
+   510→                    </div>
+   511→
+   512→                    {/* Password */}
+   513→                    <div className="space-y-1.5">
+   514→                      <div className="flex items-center justify-between">
+   515→                        <Label htmlFor="login-password" className="text-foreground text-[13px] font-medium">
+   516→                          Password
+   517→                        </Label>
+   518→                        <button
+   519→                          type="button"
+   520→                          className="text-[12px] text-[#00D09C] hover:text-[#00b88a] font-medium transition-colors"
+   521→                        >
+   522→                          Forgot password?
+   523→                        </button>
+   524→                      </div>
+   525→                      <div className="relative">
+   526→                        <Lock className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+   527→                        <Input
+   528→                          id="login-password"
+   529→                          type={showPassword ? 'text' : 'password'}
+   530→                          placeholder="Enter your password"
+   531→                          value={password}
+   532→                          onChange={(e) => setPassword(e.target.value)}
+   533→                          className="pl-10 pr-10 h-[46px] text-foreground placeholder:text-muted-foreground bg-muted border-border rounded-lg text-[14px] focus-visible:border-[#00D09C] focus-visible:ring-[#00D09C]/15 focus-visible:bg-card"
+   534→                          required
+   535→                          autoComplete="current-password"
+   536→                        />
+   537→                        <button
+   538→                          type="button"
+   539→                          onClick={() => setShowPassword(!showPassword)}
+   540→                          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-muted-foreground transition-colors"
+   541→                        >
+   542→                          {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+   543→                        </button>
+   544→                      </div>
+   545→                    </div>
+   546→
+   547→                    {/* Error */}
+   548→                    {error && (
+   549→                      <motion.div
+   550→                        initial={{ opacity: 0, y: -4 }}
+   551→                        animate={{ opacity: 1, y: 0 }}
+   552→                        className="p-3 rounded-lg bg-[#eb5b3c]/[0.07] border border-[#eb5b3c]/20 text-[#eb5b3c] text-[13px]"
+   553→                      >
+   554→                        {error}
+   555→                      </motion.div>
+   556→                    )}
+   557→
+   558→                    {/* Submit */}
+   559→                    <button
+   560→                      type="submit"
+   561→                      disabled={isLoading}
+   562→                      className="w-full h-[46px] text-[15px] font-semibold rounded-lg bg-[#00D09C] text-white hover:bg-[#00b88a] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-[0_1px_2px_rgba(0,208,156,0.2)]"
+   563→                    >
+   564→                      {isLoading ? (
+   565→                        <div className="flex items-center gap-2">
+   566→                          <div className="size-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+   567→                          Signing in...
+   568→                        </div>
+   569→                      ) : (
+   570→                        <div className="flex items-center gap-2">
+   571→                          Sign In
+   572→                          <ArrowRight className="size-4" />
+   573→                        </div>
+   574→                      )}
+   575→                    </button>
+   576→                  </form>
+   577→
+   578→                  {/* Switch to Signup */}
+   579→                  <div className="mt-7 text-center">
+   580→                    <p className="text-muted-foreground text-[13px]">
+   581→                      Don&apos;t have an account?{' '}
+   582→                      <button
+   583→                        onClick={() => switchMode('signup')}
+   584→                        className="text-[#00D09C] font-semibold hover:text-[#00b88a] transition-colors"
+   585→                      >
+   586→                        Create Account
+   587→                      </button>
+   588→                    </p>
+   589→                  </div>
+   590→                </div>
+   591→              </motion.div>
+   592→            ) : (
+   593→              <motion.div
+   594→                key="signup"
+   595→                initial={{ opacity: 0, x: 8 }}
+   596→                animate={{ opacity: 1, x: 0 }}
+   597→                exit={{ opacity: 0, x: -8 }}
+   598→                transition={{ duration: 0.25 }}
+   599→              >
+   600→                {/* Signup Card */}
+   601→                <div className="bg-card rounded-2xl border border-border shadow-[0_1px_3px_rgba(0,0,0,0.04)] p-7 sm:p-8">
+   602→                  <div className="mb-7">
+   603→                    <h2 className="text-[22px] font-bold text-foreground">Create Account</h2>
+   604→                    <p className="text-muted-foreground text-[14px] mt-1">
+   605→                      Start trading with ₹1,00,000 virtual cash
+   606→                    </p>
+   607→                  </div>
+   608→
+   609→                  <form onSubmit={handleSignup} className="space-y-4">
+   610→                    {/* Google Sign-In */}
+   611→                    {/* Hidden container for GIS rendered button */}
+   612→                    <div ref={googleButtonRef} className="hidden" aria-hidden="true" />
+   613→
+   614→                    <button
+   615→                      type="button"
+   616→                      onClick={handleGoogleSignIn}
+   617→                      disabled={googleLoading}
+   618→                      className="w-full h-[46px] text-[14px] font-medium rounded-lg bg-card text-foreground border border-border hover:bg-background hover:border-border transition-all duration-200 flex items-center justify-center gap-2.5 shadow-[0_1px_2px_rgba(0,0,0,0.04)] disabled:opacity-50 disabled:cursor-not-allowed"
+   619→                    >
+   620→                      {googleLoading ? (
+   621→                        <div className="flex items-center gap-2">
+   622→                          <div className="size-4 border-2 border-border/30 border-t-border rounded-full animate-spin" />
+   623→                          Connecting...
+   624→                        </div>
+   625→                      ) : (
+   626→                        <>
+   627→                          <GoogleIcon className="size-5" />
+   628→                          Sign up with Google
+   629→                        </>
+   630→                      )}
+   631→                    </button>
+   632→
+   633→                    {/* Divider */}
+   634→                    <div className="relative flex items-center gap-3">
+   635→                      <div className="flex-1 h-px bg-muted" />
+   636→                      <span className="text-[12px] text-muted-foreground font-medium">or</span>
+   637→                      <div className="flex-1 h-px bg-muted" />
+   638→                    </div>
+   639→
+   640→                    {/* Name */}
+   641→                    <div className="space-y-1.5">
+   642→                      <Label htmlFor="signup-name" className="text-foreground text-[13px] font-medium">
+   643→                        Full Name
+   644→                      </Label>
+   645→                      <div className="relative">
+   646→                        <User className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+   647→                        <Input
+   648→                          id="signup-name"
+   649→                          type="text"
+   650→                          placeholder="Enter your full name"
+   651→                          value={name}
+   652→                          onChange={(e) => setName(e.target.value)}
+   653→                          className="pl-10 h-[46px] text-foreground placeholder:text-muted-foreground bg-muted border-border rounded-lg text-[14px] focus-visible:border-[#00D09C] focus-visible:ring-[#00D09C]/15 focus-visible:bg-card"
+   654→                          required
+   655→                          autoComplete="name"
+   656→                        />
+   657→                      </div>
+   658→                    </div>
+   659→
+   660→                    {/* Email */}
+   661→                    <div className="space-y-1.5">
+   662→                      <Label htmlFor="signup-email" className="text-foreground text-[13px] font-medium">
+   663→                        Email Address
+   664→                      </Label>
+   665→                      <div className="relative">
+   666→                        <Mail className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+   667→                        <Input
+   668→                          id="signup-email"
+   669→                          type="email"
+   670→                          placeholder="you@example.com"
+   671→                          value={email}
+   672→                          onChange={(e) => setEmail(e.target.value)}
+   673→                          className="pl-10 h-[46px] text-foreground placeholder:text-muted-foreground bg-muted border-border rounded-lg text-[14px] focus-visible:border-[#00D09C] focus-visible:ring-[#00D09C]/15 focus-visible:bg-card"
+   674→                          required
+   675→                          autoComplete="email"
+   676→                        />
+   677→                      </div>
+   678→                    </div>
+   679→
+   680→                    {/* Phone (optional) */}
+   681→                    <div className="space-y-1.5">
+   682→                      <Label htmlFor="signup-phone" className="text-foreground text-[13px] font-medium">
+   683→                        Phone Number <span className="text-muted-foreground font-normal">(optional)</span>
+   684→                      </Label>
+   685→                      <div className="relative">
+   686→                        <Phone className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+   687→                        <Input
+   688→                          id="signup-phone"
+   689→                          type="tel"
+   690→                          placeholder="+91 98765 43210"
+   691→                          value={phone}
+   692→                          onChange={(e) => setPhone(e.target.value)}
+   693→                          className="pl-10 h-[46px] text-foreground placeholder:text-muted-foreground bg-muted border-border rounded-lg text-[14px] focus-visible:border-[#00D09C] focus-visible:ring-[#00D09C]/15 focus-visible:bg-card"
+   694→                          autoComplete="tel"
+   695→                        />
+   696→                      </div>
+   697→                    </div>
+   698→
+   699→                    {/* Password */}
+   700→                    <div className="space-y-1.5">
+   701→                      <Label htmlFor="signup-password" className="text-foreground text-[13px] font-medium">
+   702→                        Password
+   703→                      </Label>
+   704→                      <div className="relative">
+   705→                        <Lock className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+   706→                        <Input
+   707→                          id="signup-password"
+   708→                          type={showPassword ? 'text' : 'password'}
+   709→                          placeholder="Min 6 characters"
+   710→                          value={password}
+   711→                          onChange={(e) => setPassword(e.target.value)}
+   712→                          className="pl-10 pr-10 h-[46px] text-foreground placeholder:text-muted-foreground bg-muted border-border rounded-lg text-[14px] focus-visible:border-[#00D09C] focus-visible:ring-[#00D09C]/15 focus-visible:bg-card"
+   713→                          required
+   714→                          autoComplete="new-password"
+   715→                        />
+   716→                        <button
+   717→                          type="button"
+   718→                          onClick={() => setShowPassword(!showPassword)}
+   719→                          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-muted-foreground transition-colors"
+   720→                        >
+   721→                          {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+   722→                        </button>
+   723→                      </div>
+   724→                      {/* Password strength indicator */}
+   725→                      {password && (
+   726→                        <div className="mt-2">
+   727→                          <div className="flex gap-1">
+   728→                            {[1, 2, 3, 4].map((level) => {
+   729→                              const strength = getPasswordStrength(password)
+   730→                              return (
+   731→                                <div
+   732→                                  key={level}
+   733→                                  className={`h-1 flex-1 rounded-full transition-colors duration-200 ${
+   734→                                    level <= strength.level ? strength.color : 'bg-muted'
+   735→                                  }`}
+   736→                                />
+   737→                              )
+   738→                            })}
+   739→                          </div>
+   740→                          <p className={`text-[11px] mt-1 font-medium ${getPasswordStrength(password).textColor}`}>
+   741→                            {getPasswordStrength(password).label}
+   742→                          </p>
+   743→                        </div>
+   744→                      )}
+   745→                    </div>
+   746→
+   747→                    {/* Confirm Password */}
+   748→                    <div className="space-y-1.5">
+   749→                      <Label htmlFor="signup-confirm" className="text-foreground text-[13px] font-medium">
+   750→                        Confirm Password
+   751→                      </Label>
+   752→                      <div className="relative">
+   753→                        <Lock className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+   754→                        <Input
+   755→                          id="signup-confirm"
+   756→                          type={showPassword ? 'text' : 'password'}
+   757→                          placeholder="Re-enter your password"
+   758→                          value={confirmPassword}
+   759→                          onChange={(e) => setConfirmPassword(e.target.value)}
+   760→                          className={`pl-10 h-[46px] text-foreground placeholder:text-muted-foreground rounded-lg text-[14px] focus-visible:ring-[#00D09C]/15 focus-visible:bg-card ${
+   761→                            confirmPassword && confirmPassword !== password
+   762→                              ? 'bg-muted border-[#eb5b3c] focus-visible:border-[#eb5b3c] focus-visible:ring-[#eb5b3c]/15'
+   763→                              : 'bg-muted border-border focus-visible:border-[#00D09C]'
+   764→                          }`}
+   765→                          required
+   766→                          autoComplete="new-password"
+   767→                        />
+   768→                      </div>
+   769→                      {confirmPassword && confirmPassword !== password && (
+   770→                        <p className="text-[#eb5b3c] text-[11px] mt-1 font-medium">Passwords do not match</p>
+   771→                      )}
+   772→                      {confirmPassword && confirmPassword === password && confirmPassword.length > 0 && (
+   773→                        <p className="text-[#22c55e] text-[11px] mt-1 font-medium">Passwords match</p>
+   774→                      )}
+   775→                    </div>
+   776→
+   777→                    {/* Terms */}
+   778→                    <div className="flex items-start gap-2.5 pt-0.5">
+   779→                      <input
+   780→                        type="checkbox"
+   781→                        id="terms"
+   782→                        required
+   783→                        className="mt-[3px] size-3.5 rounded border-muted-foreground accent-[#00D09C] cursor-pointer"
+   784→                      />
+   785→                      <label htmlFor="terms" className="text-[12px] text-muted-foreground leading-relaxed cursor-pointer">
+   786→                        I agree to the{' '}
+   787→                        <span className="text-[#00D09C] hover:underline cursor-pointer font-medium">Terms of Service</span>{' '}
+   788→                        and{' '}
+   789→                        <span className="text-[#00D09C] hover:underline cursor-pointer font-medium">Privacy Policy</span>
+   790→                      </label>
+   791→                    </div>
+   792→
+   793→                    {/* Error */}
+   794→                    {error && (
+   795→                      <motion.div
+   796→                        initial={{ opacity: 0, y: -4 }}
+   797→                        animate={{ opacity: 1, y: 0 }}
+   798→                        className="p-3 rounded-lg bg-[#eb5b3c]/[0.07] border border-[#eb5b3c]/20 text-[#eb5b3c] text-[13px]"
+   799→                      >
+   800→                        {error}
+   801→                      </motion.div>
+   802→                    )}
+   803→
+   804→                    {/* Success */}
+   805→                    {success && (
+   806→                      <motion.div
+   807→                        initial={{ opacity: 0, y: -4 }}
+   808→                        animate={{ opacity: 1, y: 0 }}
+   809→                        className="p-3 rounded-lg bg-[#22c55e]/[0.07] border border-[#22c55e]/20 text-[#22c55e] text-[13px]"
+   810→                      >
+   811→                        {success}
+   812→                      </motion.div>
+   813→                    )}
+   814→
+   815→                    {/* Submit */}
+   816→                    <button
+   817→                      type="submit"
+   818→                      disabled={isLoading || (confirmPassword !== '' && confirmPassword !== password)}
+   819→                      className="w-full h-[46px] text-[15px] font-semibold rounded-lg bg-[#00D09C] text-white hover:bg-[#00b88a] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-[0_1px_2px_rgba(0,208,156,0.2)]"
+   820→                    >
+   821→                      {isLoading ? (
+   822→                        <div className="flex items-center gap-2">
+   823→                          <div className="size-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+   824→                          Creating Account...
+   825→                        </div>
+   826→                      ) : (
+   827→                        <div className="flex items-center gap-2">
+   828→                          Create Account
+   829→                          <ArrowRight className="size-4" />
+   830→                        </div>
+   831→                      )}
+   832→                    </button>
+   833→                  </form>
+   834→
+   835→                  {/* Switch to Login */}
+   836→                  <div className="mt-6 text-center">
+   837→                    <p className="text-muted-foreground text-[13px]">
+   838→                      Already have an account?{' '}
+   839→                      <button
+   840→                        onClick={() => switchMode('login')}
+   841→                        className="text-[#00D09C] font-semibold hover:text-[#00b88a] transition-colors"
+   842→                      >
+   843→                        Sign In
+   844→                      </button>
+   845→                    </p>
+   846→                  </div>
+   847→                </div>
+   848→              </motion.div>
+   849→            )}
+   850→          </AnimatePresence>
+   851→
+   852→          {/* Bottom info */}
+   853→          <div className="mt-6">
+   854→            <div className="flex items-center justify-center gap-3 text-[11px] text-muted-foreground font-medium">
+   855→              <span>Secure</span>
+   856→              <span className="text-muted-foreground">•</span>
+   857→              <span>Made in India</span>
+   858→              <span className="text-muted-foreground">•</span>
+   859→              <span>₹0 Cost</span>
+   860→            </div>
+   861→          </div>
+   862→        </motion.div>
+   863→      </div>
+   864→    </div>
+   865→  )
+   866→}
+   867→

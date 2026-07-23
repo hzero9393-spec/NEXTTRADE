@@ -1,0 +1,908 @@
+     1→     1→     1→// Pepertect - Indian Stock Market Paper Trading Platform
+     2→     2→     2→// Prisma Schema for PostgreSQL
+     3→     3→     3→
+     4→     4→     4→generator client {
+     5→     5→     5→  provider = "prisma-client-js"
+     6→     6→     6→}
+     7→     7→     7→
+     8→     8→     8→datasource db {
+     9→     9→     9→  provider = "postgresql"
+    10→    10→    10→  url      = env("DATABASE_URL")
+    11→    11→    11→}
+    12→    12→    12→
+    13→    13→    13→// ============================================================
+    14→    14→    14→// USER & AUTHENTICATION
+    15→    15→    15→// ============================================================
+    16→    16→    16→
+    17→    17→    17→model User {
+    18→    18→    18→  id              String    @id @default(cuid())
+    19→    19→    19→  name            String
+    20→    20→    20→  email           String    @unique
+    21→    21→    21→  phone           String?   @unique
+    22→    22→    22→  panNumber       String?   @unique
+    23→    23→    23→  passwordHash    String?   // Optional for OAuth users (Google sign-in)
+    24→    24→    24→  oauthProvider   String?   // 'google', 'github', etc.
+    25→    25→    25→  oauthId         String?   // Provider-specific user ID
+    26→    26→    26→  avatar          String?
+    27→    27→    27→  role            String    @default("USER") // UserRole: USER, ADMIN, SUPER_ADMIN
+    28→    28→    28→  subscription    String    @default("FREE") // SubscriptionTier: FREE, PREMIUM
+    29→    29→    29→
+    30→    30→    30→  // Virtual Trading Account
+    31→    31→    31→  virtualBalance  Float     @default(100000) // ₹1,00,000 default
+    32→    32→    32→  marginUsed      Float     @default(0)
+    33→    33→    33→
+    34→    34→    34→  // Stats
+    35→    35→    35→  totalTrades     Int       @default(0)
+    36→    36→    36→  winRate         Float     @default(0)
+    37→    37→    37→  totalPnl        Float     @default(0)
+    38→    38→    38→  rank            Int?
+    39→    39→    39→
+    40→    40→    40→  // Subscription Details
+    41→    41→    41→  subscriptionId  String?
+    42→    42→    42→  subscriptionEnd DateTime?
+    43→    43→    43→  dailyTrades     Int       @default(0)
+    44→    44→    44→  dailyPositions  Int       @default(0)
+    45→    45→    45→  lastResetDate   DateTime?
+    46→    46→    46→
+    47→    47→    47→  // Security
+    48→    48→    48→  twoFactorSecret   String?
+    49→    49→    49→  twoFactorEnabled  Boolean  @default(false)
+    50→    50→    50→  notificationsEnabled Boolean @default(false)
+    51→    51→    51→  pushSubscriptionId String?
+    52→    52→    52→
+    53→    53→    53→  // Metadata
+    54→    54→    54→  isEmailVerified Boolean   @default(false)
+    55→    55→    55→  isPhoneVerified Boolean   @default(false)
+    56→    56→    56→  isActive        Boolean   @default(true)
+    57→    57→    57→  lastLoginAt     DateTime?
+    58→    58→    58→  createdAt       DateTime  @default(now())
+    59→    59→    59→  updatedAt       DateTime  @updatedAt
+    60→    60→    60→
+    61→    61→    61→  // Relations
+    62→    62→    62→  trades          Trade[]
+    63→    63→    63→  orders          Order[]
+    64→    64→    64→  positions       Position[]
+    65→    65→    65→  portfolios      Portfolio[]
+    66→    66→    66→  sessions        Session[]
+    67→    67→    67→  watchlistItems  WatchlistItem[]
+    68→    68→    68→  watchlists      Watchlist[]
+    69→    69→    69→  notifications   Notification[]
+    70→    70→    70→  notificationLogs NotificationLog[]
+    71→    71→    71→  priceAlerts     PriceAlert[]
+    72→    72→    72→  pushSubscriptions PushSubscription[]
+    73→    73→    73→  savedAnalyses   SavedAnalysis[]
+    74→    74→    74→  subscriptionTransactions SubscriptionTransaction[]
+    75→    75→    75→  supportTickets  SupportTicket[]
+    76→    76→    76→
+    77→    77→    77→  @@index([email])
+    78→    78→    78→  @@unique([oauthProvider, oauthId])
+    79→    79→    79→  @@map("users")
+    80→    80→    80→}
+    81→    81→    81→
+    82→    82→    82→model Session {
+    83→    83→    83→  id           String   @id @default(cuid())
+    84→    84→    84→  userId       String
+    85→    85→    85→  token        String   @unique
+    86→    86→    86→  device       String?
+    87→    87→    87→  ipAddress    String?
+    88→    88→    88→  expiresAt    DateTime
+    89→    89→    89→  createdAt    DateTime @default(now())
+    90→    90→    90→
+    91→    91→    91→  // Extended Device Info
+    92→    92→    92→  browser      String?
+    93→    93→    93→  os           String?
+    94→    94→    94→  deviceType   String?
+    95→    95→    95→  location     String?
+    96→    96→    96→
+    97→    97→    97→  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+    98→    98→    98→
+    99→    99→    99→  @@map("sessions")
+   100→   100→   100→}
+   101→   101→   101→
+   102→   102→   102→// ============================================================
+   103→   103→   103→// MARKET DATA - INDICES
+   104→   104→   104→// ============================================================
+   105→   105→   105→
+   106→   106→   106→model Index {
+   107→   107→   107→  id              String   @id @default(cuid())
+   108→   108→   108→  symbol          String   @unique // NIFTY, BANKNIFTY, FINNIFTY, SENSEX, MIDCPNIFTY
+   109→   109→   109→  name            String   // "NIFTY 50", "BANK NIFTY"
+   110→   110→   110→  lotSize         Int      // 50, 25, 40, 15, 75
+   111→   111→   111→  expiryDay       String   // "Thursday", "Wednesday", "Tuesday"
+   112→   112→   112→  tickSize        Float    @default(0.05)
+   113→   113→   113→  strikeInterval  Int      // 50, 100
+   114→   114→   114→
+   115→   115→   115→  // Price Data
+   116→   116→   116→  currentPrice    Float
+   117→   117→   117→  open            Float?
+   118→   118→   118→  high            Float?
+   119→   119→   119→  low             Float?
+   120→   120→   120→  previousClose   Float?
+   121→   121→   121→  change          Float    @default(0)
+   122→   122→   122→  changePercent   Float    @default(0)
+   123→   123→   123→  volume          Float?
+   124→   124→   124→  
+   125→   125→   125→  // Status
+   126→   126→   126→  isEnabled       Boolean  @default(true)
+   127→   127→   127→  lastUpdated     DateTime @default(now())
+   128→   128→   128→  createdAt       DateTime @default(now())
+   129→   129→   129→  updatedAt       DateTime @updatedAt
+   130→   130→   130→
+   131→   131→   131→  indexHistory    IndexHistory[]
+   132→   132→   132→
+   133→   133→   133→  @@index([symbol])
+   134→   134→   134→  @@map("indices")
+   135→   135→   135→}
+   136→   136→   136→
+   137→   137→   137→model IndexHistory {
+   138→   138→   138→  id              String   @id @default(cuid())
+   139→   139→   139→  indexSymbol     String
+   140→   140→   140→  date            DateTime
+   141→   141→   141→  open            Float
+   142→   142→   142→  high            Float
+   143→   143→   143→  low             Float
+   144→   144→   144→  close           Float
+   145→   145→   145→  volume          Float?
+   146→   146→   146→  createdAt       DateTime @default(now())
+   147→   147→   147→
+   148→   148→   148→  index           Index    @relation(fields: [indexSymbol], references: [symbol], onDelete: Cascade)
+   149→   149→   149→
+   150→   150→   150→  @@unique([indexSymbol, date])
+   151→   151→   151→  @@map("index_history")
+   152→   152→   152→}
+   153→   153→   153→
+   154→   154→   154→// ============================================================
+   155→   155→   155→// MARKET DATA - STOCKS (NSE)
+   156→   156→   156→// ============================================================
+   157→   157→   157→
+   158→   158→   158→model Stock {
+   159→   159→   159→  id                  String   @id @default(cuid())
+   160→   160→   160→  symbol              String   @unique // RELIANCE, TCS, HDFCBANK etc
+   161→   161→   161→  name                String   // "Reliance Industries Ltd"
+   162→   162→   162→  isin                String?  // INE002A01018
+   163→   163→   163→  sector              String   // "Energy", "IT", "Banking"
+   164→   164→   164→  industry            String?
+   165→   165→   165→  exchange            String   @default("NSE") // NSE, BSE
+   166→   166→   166→  
+   167→   167→   167→  // Fundamentals
+   168→   168→   168→  faceValue           Float?
+   169→   169→   169→  marketCap           Float?
+   170→   170→   170→  peRatio             Float?
+   171→   171→   171→  dividendYield       Float?
+   172→   172→   172→
+   173→   173→   173→  // F&O Details
+   174→   174→   174→  lotSize             Int      @default(1)
+   175→   175→   175→  isFuturesAvailable  Boolean  @default(false)
+   176→   176→   176→  isOptionsAvailable  Boolean  @default(false)
+   177→   177→   177→  strikeInterval      Int?     // Based on price range
+   178→   178→   178→  circuitLimit        Float    @default(20) // 10%, 20%
+   179→   179→   179→
+   180→   180→   180→  // Price Data
+   181→   181→   181→  currentPrice        Float
+   182→   182→   182→  open                Float?
+   183→   183→   183→  high                Float?
+   184→   184→   184→  low                 Float?
+   185→   185→   185→  previousClose       Float?
+   186→   186→   186→  change              Float    @default(0)
+   187→   187→   187→  changePercent       Float    @default(0)
+   188→   188→   188→  volume              Float?
+   189→   189→   189→  
+   190→   190→   190→  // 52 Week
+   191→   191→   191→  week52High          Float?
+   192→   192→   192→  week52Low           Float?
+   193→   193→   193→
+   194→   194→   194→  // Status
+   195→   195→   195→  isFnoBan            Boolean  @default(false)
+   196→   196→   196→  banStartDate        DateTime?
+   197→   197→   197→  banEndDate          DateTime?
+   198→   198→   198→  isActive            Boolean  @default(true)
+   199→   199→   199→  lastUpdated         DateTime @default(now())
+   200→   200→   200→  createdAt           DateTime @default(now())
+   201→   201→   201→  updatedAt           DateTime @updatedAt
+   202→   202→   202→
+   203→   203→   203→  stockHistory        StockHistory[]
+   204→   204→   204→
+   205→   205→   205→  @@index([symbol])
+   206→   206→   206→  @@index([sector])
+   207→   207→   207→  @@map("stocks")
+   208→   208→   208→}
+   209→   209→   209→
+   210→   210→   210→model StockHistory {
+   211→   211→   211→  id              String   @id @default(cuid())
+   212→   212→   212→  stockSymbol     String
+   213→   213→   213→  date            DateTime
+   214→   214→   214→  open            Float
+   215→   215→   215→  high            Float
+   216→   216→   216→  low             Float
+   217→   217→   217→  close           Float
+   218→   218→   218→  volume          Float?
+   219→   219→   219→  createdAt       DateTime @default(now())
+   220→   220→   220→
+   221→   221→   221→  stock           Stock    @relation(fields: [stockSymbol], references: [symbol], onDelete: Cascade)
+   222→   222→   222→
+   223→   223→   223→  @@unique([stockSymbol, date])
+   224→   224→   224→  @@map("stock_history")
+   225→   225→   225→}
+   226→   226→   226→
+   227→   227→   227→// ============================================================
+   228→   228→   228→// DERIVATIVES - FUTURES
+   229→   229→   229→// ============================================================
+   230→   230→   230→
+   231→   231→   231→model Future {
+   232→   232→   232→  id              String   @id @default(cuid())
+   233→   233→   233→  underlying      String   // NIFTY, BANKNIFTY, RELIANCE etc
+   234→   234→   234→  underlyingType  String   @default("INDEX") // UnderlyingType: INDEX, STOCK
+   235→   235→   235→  expiryDate      DateTime
+   236→   236→   236→  expiryType      String   @default("MONTHLY") // ExpiryType: WEEKLY, MONTHLY
+   237→   237→   237→  lotSize         Int
+   238→   238→   238→
+   239→   239→   239→  // Price Data
+   240→   240→   240→  ltp             Float
+   241→   241→   241→  open            Float?
+   242→   242→   242→  high            Float?
+   243→   243→   243→  low             Float?
+   244→   244→   244→  previousClose   Float?
+   245→   245→   245→  change          Float    @default(0)
+   246→   246→   246→  changePercent   Float    @default(0)
+   247→   247→   247→  
+   248→   248→   248→  // Futures Specific
+   249→   249→   249→  openInterest    Float    @default(0)
+   250→   250→   250→  oiChange        Float    @default(0)
+   251→   251→   251→  volume          Float    @default(0)
+   252→   252→   252→  basis           Float    @default(0) // Future Price - Spot Price
+   253→   253→   253→  
+   254→   254→   254→  // Margin
+   255→   255→   255→  marginPercent   Float    @default(10) // SPAN + Exposure margin %
+   256→   256→   256→  
+   257→   257→   257→  isActive        Boolean  @default(true)
+   258→   258→   258→  lastUpdated     DateTime @default(now())
+   259→   259→   259→  createdAt       DateTime @default(now())
+   260→   260→   260→  updatedAt       DateTime @updatedAt
+   261→   261→   261→
+   262→   262→   262→  @@unique([underlying, expiryDate])
+   263→   263→   263→  @@map("futures")
+   264→   264→   264→}
+   265→   265→   265→
+   266→   266→   266→// ============================================================
+   267→   267→   267→// DERIVATIVES - OPTIONS (Indian Market Style)
+   268→   268→   268→// ============================================================
+   269→   269→   269→
+   270→   270→   270→model Option {
+   271→   271→   271→  id              String   @id @default(cuid())
+   272→   272→   272→  underlying      String   // NIFTY, BANKNIFTY, RELIANCE etc
+   273→   273→   273→  underlyingType  String   @default("INDEX") // UnderlyingType: INDEX, STOCK
+   274→   274→   274→  underlyingPrice Float    // Spot price at time of record
+   275→   275→   275→  expiryDate      DateTime
+   276→   276→   276→  expiryType      String   @default("WEEKLY") // ExpiryType: WEEKLY, MONTHLY
+   277→   277→   277→  strikePrice     Float
+   278→   278→   278→  optionType      String   // OptionType: CE, PE
+   279→   279→   279→  
+   280→   280→   280→  // Price Data
+   281→   281→   281→  ltp             Float
+   282→   282→   282→  previousClose   Float?
+   283→   283→   283→  change          Float    @default(0)
+   284→   284→   284→  changePercent   Float    @default(0)
+   285→   285→   285→  
+   286→   286→   286→  // Option Chain Data (Indian Market Standard)
+   287→   287→   287→  openInterest    Float    @default(0) // In Lakhs
+   288→   288→   288→  oiChange        Float    @default(0)
+   289→   289→   289→  oiChangePercent Float    @default(0)
+   290→   290→   290→  volume          Float    @default(0)
+   291→   291→   291→  impliedVolatility Float  @default(0)
+   292→   292→   292→  
+   293→   293→   293→  // Greeks
+   294→   294→   294→  delta           Float?
+   295→   295→   295→  gamma           Float?
+   296→   296→   296→  theta           Float?
+   297→   297→   297→  vega            Float?
+   298→   298→   298→  
+   299→   299→   299→  // Classification
+   300→   300→   300→  inTheMoney      Boolean  @default(false)
+   301→   301→   301→  
+   302→   302→   302→  isActive        Boolean  @default(true)
+   303→   303→   303→  lastUpdated     DateTime @default(now())
+   304→   304→   304→  createdAt       DateTime @default(now())
+   305→   305→   305→  updatedAt       DateTime @updatedAt
+   306→   306→   306→
+   307→   307→   307→  @@unique([underlying, expiryDate, strikePrice, optionType])
+   308→   308→   308→  @@map("options")
+   309→   309→   309→}
+   310→   310→   310→
+   311→   311→   311→// ============================================================
+   312→   312→   312→// TRADING - ORDERS
+   313→   313→   313→// ============================================================
+   314→   314→   314→
+   315→   315→   315→model Order {
+   316→   316→   316→  id              String      @id @default(cuid())
+   317→   317→   317→  userId          String
+   318→   318→   318→  orderType       String      // OrderType: MARKET, LIMIT, SL, SL_M
+   319→   319→   319→  tradeDirection  String      // TradeDirection: BUY, SELL
+   320→   320→   320→  segment         String      // Segment: EQUITY, FUTURES, OPTIONS
+   321→   321→   321→  productType     String      // ProductType: INTRADAY, DELIVERY, CARRY_FORWARD
+   322→   322→   322→  
+   323→   323→   323→  // Instrument Details
+   324→   324→   324→  symbol          String      // NIFTY, RELIANCE etc
+   325→   325→   325→  instrumentId    String?     // Future/Option ID if applicable
+   326→   326→   326→  optionType      String?     // OptionType: CE, PE (for options)
+   327→   327→   327→  strikePrice     Float?      // For options
+   328→   328→   328→  expiryDate      DateTime?   // For derivatives
+   329→   329→   329→  lotSize         Int         @default(1)
+   330→   330→   330→  lots            Int         @default(1)
+   331→   331→   331→  
+   332→   332→   332→  // Price & Quantity
+   333→   333→   333→  quantity        Int
+   334→   334→   334→  price           Float       // Order price
+   335→   335→   335→  triggerPrice    Float?      // For SL orders
+   336→   336→   336→  fillPrice       Float?      // Actual execution price
+   337→   337→   337→  
+   338→   338→   338→  // Calculated
+   339→   339→   339→  totalValue      Float       @default(0)
+   340→   340→   340→  brokerage       Float       @default(0)
+   341→   341→   341→  marginRequired  Float       @default(0)
+   342→   342→   342→  
+   343→   343→   343→  // Stop Loss / Target
+   344→   344→   344→  stopLoss        Float?
+   345→   345→   345→  target          Float?
+   346→   346→   346→  
+   347→   347→   347→  // Status
+   348→   348→   348→  status          String      @default("PENDING") // OrderStatus: PENDING, PARTIALLY_FILLED, FILLED, CANCELLED, REJECTED, EXPIRED
+   349→   349→   349→  rejectReason    String?
+   350→   350→   350→  
+   351→   351→   351→  // Timestamps
+   352→   352→   352→  placedAt        DateTime    @default(now())
+   353→   353→   353→  filledAt        DateTime?
+   354→   354→   354→  cancelledAt     DateTime?
+   355→   355→   355→  createdAt       DateTime    @default(now())
+   356→   356→   356→  updatedAt       DateTime    @updatedAt
+   357→   357→   357→
+   358→   358→   358→  // Relations
+   359→   359→   359→  user            User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+   360→   360→   360→  trade           Trade?
+   361→   361→   361→
+   362→   362→   362→  @@index([userId, status])
+   363→   363→   363→  @@index([userId, placedAt])
+   364→   364→   364→  @@map("orders")
+   365→   365→   365→}
+   366→   366→   366→
+   367→   367→   367→// ============================================================
+   368→   368→   368→// TRADING - TRADES (Executed)
+   369→   369→   369→// ============================================================
+   370→   370→   370→
+   371→   371→   371→model Trade {
+   372→   372→   372→  id              String      @id @default(cuid())
+   373→   373→   373→  userId          String
+   374→   374→   374→  orderId         String?     @unique
+   375→   375→   375→  segment         String      // Segment: EQUITY, FUTURES, OPTIONS
+   376→   376→   376→  productType     String      // ProductType: INTRADAY, DELIVERY, CARRY_FORWARD
+   377→   377→   377→  tradeDirection  String      // TradeDirection: BUY, SELL
+   378→   378→   378→  
+   379→   379→   379→  // Instrument
+   380→   380→   380→  symbol          String
+   381→   381→   381→  instrumentId    String?
+   382→   382→   382→  optionType      String?     // OptionType: CE, PE
+   383→   383→   383→  strikePrice     Float?
+   384→   384→   384→  expiryDate      DateTime?
+   385→   385→   385→  
+   386→   386→   386→  // Execution
+   387→   387→   387→  quantity        Int
+   388→   388→   388→  fillPrice       Float
+   389→   389→   389→  totalValue      Float
+   390→   390→   390→  brokerage       Float       @default(0)
+   391→   391→   391→  
+   392→   392→   392→  // P&L
+   393→   393→   393→  pnl             Float?
+   394→   394→   394→  pnlPercent      Float?
+   395→   395→   395→  
+   396→   396→   396→  // Timestamps
+   397→   397→   397→  executedAt      DateTime    @default(now())
+   398→   398→   398→  squaredOffAt    DateTime?
+   399→   399→   399→  createdAt       DateTime    @default(now())
+   400→   400→   400→  updatedAt       DateTime    @updatedAt
+   401→   401→   401→
+   402→   402→   402→  // Relations
+   403→   403→   403→  user            User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+   404→   404→   404→  order           Order?      @relation(fields: [orderId], references: [id], onDelete: SetNull)
+   405→   405→   405→
+   406→   406→   406→  @@index([userId, executedAt])
+   407→   407→   407→  @@map("trades")
+   408→   408→   408→}
+   409→   409→   409→
+   410→   410→   410→// ============================================================
+   411→   411→   411→// TRADING - POSITIONS (Open)
+   412→   412→   412→// ============================================================
+   413→   413→   413→
+   414→   414→   414→model Position {
+   415→   415→   415→  id              String      @id @default(cuid())
+   416→   416→   416→  userId          String
+   417→   417→   417→  segment         String      // Segment: EQUITY, FUTURES, OPTIONS
+   418→   418→   418→  productType     String      // ProductType: INTRADAY, DELIVERY, CARRY_FORWARD
+   419→   419→   419→  tradeDirection  String      // TradeDirection: BUY, SELL
+   420→   420→   420→  
+   421→   421→   421→  // Instrument
+   422→   422→   422→  symbol          String
+   423→   423→   423→  instrumentId    String?
+   424→   424→   424→  optionType      String?     // OptionType: CE, PE
+   425→   425→   425→  strikePrice     Float?
+   426→   426→   426→  expiryDate      DateTime?
+   427→   427→   427→  lotSize         Int         @default(1)
+   428→   428→   428→  lots            Int         @default(1)
+   429→   429→   429→  quantity        Int
+   430→   430→   430→  
+   431→   431→   431→  // Cost
+   432→   432→   432→  entryPrice      Float       // Average entry price
+   433→   433→   433→  currentPrice    Float       @default(0)
+   434→   434→   434→  totalInvested   Float
+   435→   435→   435→  currentValue    Float       @default(0)
+   436→   436→   436→  
+   437→   437→   437→  // P&L
+   438→   438→   438→  unrealizedPnl   Float       @default(0)
+   439→   439→   439→  realizedPnl     Float       @default(0)
+   440→   440→   440→  
+   441→   441→   441→  // Margin
+   442→   442→   442→  marginUsed      Float       @default(0)
+   443→   443→   443→  
+   444→   444→   444→  // Stop Loss / Target / Exit
+   445→   445→   445→  stopLoss          Float?
+   446→   446→   446→  target            Float?
+   447→   447→   447→  lastCheckedPrice  Float?       // For range-based SL/Target trigger detection
+   448→   448→   448→  slTriggerLock     String?      // Idempotency lock: set when SL/Target is being executed
+   449→   449→   449→  exitReason        String?
+   450→   450→   450→  
+   451→   451→   451→  // Status
+   452→   452→   452→  isOpen          Boolean     @default(true)
+   453→   453→   453→  squaredOffAt    DateTime?
+   454→   454→   454→  createdAt       DateTime    @default(now())
+   455→   455→   455→  updatedAt       DateTime    @updatedAt
+   456→   456→   456→
+   457→   457→   457→  // Relations
+   458→   458→   458→  user            User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+   459→   459→   459→
+   460→   460→   460→  @@index([userId, isOpen])
+   461→   461→   461→  @@index([userId, segment, isOpen])
+   462→   462→   462→  @@index([userId, symbol, isOpen])
+   463→   463→   463→  @@map("positions")
+   464→   464→   464→}
+   465→   465→   465→
+   466→   466→   466→// ============================================================
+   467→   467→   467→// PORTFOLIO
+   468→   468→   468→// ============================================================
+   469→   469→   469→
+   470→   470→   470→model Portfolio {
+   471→   471→   471→  id              String   @id @default(cuid())
+   472→   472→   472→  userId          String
+   473→   473→   473→  date            DateTime @default(now())
+   474→   474→   474→  
+   475→   475→   475→  // Snapshot
+   476→   476→   476→  totalValue      Float    @default(0)
+   477→   477→   477→  equityValue     Float    @default(0)
+   478→   478→   478→  futuresValue    Float    @default(0)
+   479→   479→   479→  optionsValue    Float    @default(0)
+   480→   480→   480→  cashBalance     Float    @default(0)
+   481→   481→   481→  
+   482→   482→   482→  // Returns
+   483→   483→   483→  dayPnl          Float    @default(0)
+   484→   484→   484→  totalPnl        Float    @default(0)
+   485→   485→   485→  dayReturn       Float    @default(0)
+   486→   486→   486→  totalReturn     Float    @default(0)
+   487→   487→   487→  
+   488→   488→   488→  createdAt       DateTime @default(now())
+   489→   489→   489→
+   490→   490→   490→  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+   491→   491→   491→
+   492→   492→   492→  @@index([userId, date])
+   493→   493→   493→  @@unique([userId, date])
+   494→   494→   494→  @@map("portfolios")
+   495→   495→   495→}
+   496→   496→   496→
+   497→   497→   497→// ============================================================
+   498→   498→   498→// MARKET METADATA
+   499→   499→   499→// ============================================================
+   500→   500→   500→
+   501→   501→   501→model Sector {
+   502→   502→   502→  id              String   @id @default(cuid())
+   503→   503→   503→  name            String   @unique // "Banking", "IT", "Pharma"
+   504→   504→   504→  indexSymbol     String?  // "BANKNIFTY", "NIFTYIT"
+   505→   505→   505→  todayChange     Float    @default(0)
+   506→   506→   506→  topStockSymbol  String?
+   507→   507→   507→  topStockChange  Float?
+   508→   508→   508→  isActive        Boolean  @default(true)
+   509→   509→   509→  createdAt       DateTime @default(now())
+   510→   510→   510→  updatedAt       DateTime @updatedAt
+   511→   511→   511→
+   512→   512→   512→  @@map("sectors")
+   513→   513→   513→}
+   514→   514→   514→
+   515→   515→   515→model MarketHoliday {
+   516→   516→   516→  id              String   @id @default(cuid())
+   517→   517→   517→  name            String   // "Republic Day", "Diwali"
+   518→   518→   518→  date            DateTime @unique
+   519→   519→   519→  isMuhurat       Boolean  @default(false) // Muhurat Trading
+   520→   520→   520→  muhuratStart    String?  // "18:15"
+   521→   521→   521→  muhuratEnd      String?  // "19:15"
+   522→   522→   522→  createdAt       DateTime @default(now())
+   523→   523→   523→
+   524→   524→   524→  @@map("market_holidays")
+   525→   525→   525→}
+   526→   526→   526→
+   527→   527→   527→model FnOBanEntry {
+   528→   528→   528→  id              String   @id @default(cuid())
+   529→   529→   529→  stockSymbol     String
+   530→   530→   530→  stockName       String
+   531→   531→   531→  banStartDate    DateTime
+   532→   532→   532→  banEndDate      DateTime?
+   533→   533→   533→  reason          String?
+   534→   534→   534→  isActive        Boolean  @default(true)
+   535→   535→   535→  createdAt       DateTime @default(now())
+   536→   536→   536→  updatedAt       DateTime @updatedAt
+   537→   537→   537→
+   538→   538→   538→  @@map("fno_ban_entries")
+   539→   539→   539→}
+   540→   540→   540→
+   541→   541→   541→model MarketBreadth {
+   542→   542→   542→  id              String   @id @default(cuid())
+   543→   543→   543→  date            DateTime @default(now())
+   544→   544→   544→  advances        Int      @default(0)
+   545→   545→   545→  declines        Int      @default(0)
+   546→   546→   546→  unchanged       Int      @default(0)
+   547→   547→   547→  week52Highs     Int      @default(0)
+   548→   548→   548→  week52Lows      Int      @default(0)
+   549→   549→   549→  upperCircuit     Int      @default(0)
+   550→   550→   550→  lowerCircuit     Int      @default(0)
+   551→   551→   551→  createdAt       DateTime @default(now())
+   552→   552→   552→
+   553→   553→   553→  @@map("market_breadth")
+   554→   554→   554→}
+   555→   555→   555→
+   556→   556→   556→// ============================================================
+   557→   557→   557→// CHALLENGES & LEADERBOARD
+   558→   558→   558→// ============================================================
+   559→   559→   559→
+   560→   560→   560→model Challenge {
+   561→   561→   561→  id              String         @id @default(cuid())
+   562→   562→   562→  title           String
+   563→   563→   563→  description     String
+   564→   564→   564→  challengeType   String         // ChallengeType: RETURN_SPRINT, RISK_MANAGER, VOLUME_MASTER, ACCURACY_KING
+   565→   565→   565→  targetMetric    String         // "return%", "max_drawdown", "volume"
+   566→   566→   566→  targetValue     Float
+   567→   567→   567→  prize           String
+   568→   568→   568→  prizeValue      Float?
+   569→   569→   569→  startDate       DateTime
+   570→   570→   570→  endDate         DateTime
+   571→   571→   571→  maxParticipants Int?
+   572→   572→   572→  currentParticipants Int        @default(0)
+   573→   573→   573→  status          String         @default("UPCOMING") // ChallengeStatus: UPCOMING, ACTIVE, COMPLETED, CANCELLED
+   574→   574→   574→  tier            String         @default("FREE") // SubscriptionTier required: FREE, PREMIUM
+   575→   575→   575→  createdAt       DateTime       @default(now())
+   576→   576→   576→  updatedAt       DateTime       @updatedAt
+   577→   577→   577→
+   578→   578→   578→  participations  ChallengeParticipation[]
+   579→   579→   579→
+   580→   580→   580→  @@map("challenges")
+   581→   581→   581→}
+   582→   582→   582→
+   583→   583→   583→model ChallengeParticipation {
+   584→   584→   584→  id              String   @id @default(cuid())
+   585→   585→   585→  challengeId     String
+   586→   586→   586→  userId          String
+   587→   587→   587→  progress        Float    @default(0)
+   588→   588→   588→  result          String?  // "WON", "LOST", "IN_PROGRESS"
+   589→   589→   589→  reward          String?
+   590→   590→   590→  joinedAt        DateTime @default(now())
+   591→   591→   591→  completedAt     DateTime?
+   592→   592→   592→
+   593→   593→   593→  challenge       Challenge @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+   594→   594→   594→
+   595→   595→   595→  @@unique([challengeId, userId])
+   596→   596→   596→  @@map("challenge_participations")
+   597→   597→   597→}
+   598→   598→   598→
+   599→   599→   599→// ============================================================
+   600→   600→   600→// LEARNING
+   601→   601→   601→// ============================================================
+   602→   602→   602→
+   603→   603→   603→model LearningPath {
+   604→   604→   604→  id              String   @id @default(cuid())
+   605→   605→   605→  title           String
+   606→   606→   606→  description     String
+   607→   607→   607→  category        String   // "Beginner", "Technical Analysis", "Risk Management"
+   608→   608→   608→  totalModules    Int
+   609→   609→   609→  estimatedHours  Int
+   610→   610→   610→  difficulty      String   @default("Beginner")
+   611→   611→   611→  accentColor     String   @default("#0058be")
+   612→   612→   612→  order           Int      @default(0)
+   613→   613→   613→  isActive        Boolean  @default(true)
+   614→   614→   614→  tier            String   @default("FREE") // SubscriptionTier required: FREE, PREMIUM
+   615→   615→   615→  createdAt       DateTime @default(now())
+   616→   616→   616→  updatedAt       DateTime @updatedAt
+   617→   617→   617→
+   618→   618→   618→  modules         LearningModule[]
+   619→   619→   619→
+   620→   620→   620→  @@map("learning_paths")
+   621→   621→   621→}
+   622→   622→   622→
+   623→   623→   623→model LearningModule {
+   624→   624→   624→  id              String   @id @default(cuid())
+   625→   625→   625→  pathId          String
+   626→   626→   626→  title           String
+   627→   627→   627→  description     String
+   628→   628→   628→  content         String?  // Markdown content
+   629→   629→   629→  videoUrl        String?
+   630→   630→   630→  duration        Int      // minutes
+   631→   631→   631→  order           Int      @default(0)
+   632→   632→   632→  isActive        Boolean  @default(true)
+   633→   633→   633→  createdAt       DateTime @default(now())
+   634→   634→   634→  updatedAt       DateTime @updatedAt
+   635→   635→   635→
+   636→   636→   636→  path            LearningPath @relation(fields: [pathId], references: [id], onDelete: Cascade)
+   637→   637→   637→
+   638→   638→   638→  @@map("learning_modules")
+   639→   639→   639→}
+   640→   640→   640→
+   641→   641→   641→model UserProgress {
+   642→   642→   642→  id              String   @id @default(cuid())
+   643→   643→   643→  userId          String
+   644→   644→   644→  moduleId        String
+   645→   645→   645→  isCompleted     Boolean  @default(false)
+   646→   646→   646→  completedAt     DateTime?
+   647→   647→   647→  createdAt       DateTime @default(now())
+   648→   648→   648→  updatedAt       DateTime @updatedAt
+   649→   649→   649→
+   650→   650→   650→  @@unique([userId, moduleId])
+   651→   651→   651→  @@map("user_progress")
+   652→   652→   652→}
+   653→   653→   653→
+   654→   654→   654→// ============================================================
+   655→   655→   655→// ADMIN PANEL
+   656→   656→   656→// ============================================================
+   657→   657→   657→
+   658→   658→   658→model Admin {
+   659→   659→   659→  id              String        @id @default(cuid())
+   660→   660→   660→  username        String        @unique
+   661→   661→   661→  passwordHash    String
+   662→   662→   662→  name            String
+   663→   663→   663→  email           String        @unique
+   664→   664→   664→  role            String        @default("ADMIN") // ADMIN, SUPER_ADMIN
+   665→   665→   665→  isActive        Boolean       @default(true)
+   666→   666→   666→  lastLoginAt     DateTime?
+   667→   667→   667→  createdAt       DateTime      @default(now())
+   668→   668→   668→  updatedAt       DateTime      @updatedAt
+   669→   669→   669→
+   670→   670→   670→  activityLogs    ActivityLog[]
+   671→   671→   671→
+   672→   672→   672→  @@map("admins")
+   673→   673→   673→}
+   674→   674→   674→
+   675→   675→   675→model ActivityLog {
+   676→   676→   676→  id              String   @id @default(cuid())
+   677→   677→   677→  adminId         String
+   678→   678→   678→  action          String   // LOGIN, USER_BLOCK, USER_UNBLOCK, UPDATE_SETTINGS, etc.
+   679→   679→   679→  targetId        String?  // ID of the target entity (user, setting, etc.)
+   680→   680→   680→  details         String?  // JSON string with additional details
+   681→   681→   681→  ipAddress       String?
+   682→   682→   682→  createdAt       DateTime @default(now())
+   683→   683→   683→
+   684→   684→   684→  admin           Admin    @relation(fields: [adminId], references: [id], onDelete: Cascade)
+   685→   685→   685→
+   686→   686→   686→  @@index([adminId])
+   687→   687→   687→  @@index([action])
+   688→   688→   688→  @@index([createdAt])
+   689→   689→   689→  @@map("activity_logs")
+   690→   690→   690→}
+   691→   691→   691→
+   692→   692→   692→model PlatformSettings {
+   693→   693→   693→  id              String   @id @default(cuid())
+   694→   694→   694→  key             String   @unique
+   695→   695→   695→  value           String
+   696→   696→   696→  description     String?
+   697→   697→   697→  updatedAt       DateTime @updatedAt
+   698→   698→   698→
+   699→   699→   699→  @@map("platform_settings")
+   700→   700→   700→}
+   701→   701→   701→
+   702→   702→   702→// ============================================================
+   703→   703→   703→// WATCHLIST
+   704→   704→   704→// ============================================================
+   705→   705→   705→
+   706→   706→   706→model WatchlistItem {
+   707→   707→   707→  id              String   @id @default(cuid())
+   708→   708→   708→  userId          String
+   709→   709→   709→  symbol          String
+   710→   710→   710→  name            String?
+   711→   711→   711→  segment         String   @default("EQUITY")
+   712→   712→   712→  addedAt         DateTime @default(now())
+   713→   713→   713→
+   714→   714→   714→  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+   715→   715→   715→
+   716→   716→   716→  @@unique([userId, symbol])
+   717→   717→   717→  @@index([userId])
+   718→   718→   718→  @@map("watchlist_items")
+   719→   719→   719→}
+   720→   720→   720→
+   721→   721→   721→model Watchlist {
+   722→   722→   722→  id              String   @id @default(cuid())
+   723→   723→   723→  userId          String
+   724→   724→   724→  name            String   @default("My Watchlist")
+   725→   725→   725→  symbols         String   @default("")
+   726→   726→   726→  createdAt       DateTime @default(now())
+   727→   727→   727→  updatedAt       DateTime @updatedAt
+   728→   728→   728→
+   729→   729→   729→  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+   730→   730→   730→
+   731→   731→   731→  @@map("watchlists")
+   732→   732→   732→}
+   733→   733→   733→
+   734→   734→   734→// ============================================================
+   735→   735→   735→// NOTIFICATIONS
+   736→   736→   736→// ============================================================
+   737→   737→   737→
+   738→   738→   738→model Notification {
+   739→   739→   739→  id              String   @id @default(cuid())
+   740→   740→   740→  userId          String
+   741→   741→   741→  title           String
+   742→   742→   742→  body            String
+   743→   743→   743→  icon            String?
+   744→   744→   744→  type            String   @default("INFO") // INFO, WARNING, SUCCESS, ERROR
+   745→   745→   745→  category        String   @default("general")
+   746→   746→   746→  link            String?
+   747→   747→   747→  isRead          Boolean  @default(false)
+   748→   748→   748→  readAt          DateTime?
+   749→   749→   749→  createdAt       DateTime @default(now())
+   750→   750→   750→
+   751→   751→   751→  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+   752→   752→   752→
+   753→   753→   753→  @@map("notifications")
+   754→   754→   754→}
+   755→   755→   755→
+   756→   756→   756→model NotificationLog {
+   757→   757→   757→  id              String   @id @default(cuid())
+   758→   758→   758→  userId          String
+   759→   759→   759→  type            String
+   760→   760→   760→  title           String
+   761→   761→   761→  body            String
+   762→   762→   762→  url             String?
+   763→   763→   763→  isRead          Int      @default(0)
+   764→   764→   764→  isPushed        Int      @default(0)
+   765→   765→   765→  createdAt       DateTime @default(now())
+   766→   766→   766→
+   767→   767→   767→  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+   768→   768→   768→
+   769→   769→   769→  @@map("notification_logs")
+   770→   770→   770→}
+   771→   771→   771→
+   772→   772→   772→// ============================================================
+   773→   773→   773→// PRICE ALERTS
+   774→   774→   774→// ============================================================
+   775→   775→   775→
+   776→   776→   776→model PriceAlert {
+   777→   777→   777→  id              String   @id @default(cuid())
+   778→   778→   778→  userId          String
+   779→   779→   779→  symbol          String
+   780→   780→   780→  targetPrice     Float
+   781→   781→   781→  condition       String   @default("above") // above, below
+   782→   782→   782→  isTriggered     Boolean  @default(false)
+   783→   783→   783→  isActive        Boolean  @default(true)
+   784→   784→   784→  createdAt       DateTime @default(now())
+   785→   785→   785→  updatedAt       DateTime @updatedAt
+   786→   786→   786→
+   787→   787→   787→  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+   788→   788→   788→  @@index([userId])
+   789→   789→   789→
+   790→   790→   790→  @@map("price_alerts")
+   791→   791→   791→}
+   792→   792→   792→
+   793→   793→   793→// ============================================================
+   794→   794→   794→// PUSH SUBSCRIPTIONS
+   795→   795→   795→// ============================================================
+   796→   796→   796→
+   797→   797→   797→model PushSubscription {
+   798→   798→   798→  id              String   @id @default(cuid())
+   799→   799→   799→  userId          String
+   800→   800→   800→  endpoint        String
+   801→   801→   801→  p256dh          String
+   802→   802→   802→  auth            String
+   803→   803→   803→  deviceInfo      String?
+   804→   804→   804→  userAgent       String?
+   805→   805→   805→  isActive        Int      @default(1)
+   806→   806→   806→  createdAt       DateTime @default(now())
+   807→   807→   807→  updatedAt       DateTime @updatedAt
+   808→   808→   808→
+   809→   809→   809→  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+   810→   810→   810→  @@index([userId])
+   811→   811→   811→
+   812→   812→   812→  @@map("push_subscriptions")
+   813→   813→   813→}
+   814→   814→   814→
+   815→   815→   815→// ============================================================
+   816→   816→   816→// SAVED ANALYSES
+   817→   817→   817→// ============================================================
+   818→   818→   818→
+   819→   819→   819→model SavedAnalysis {
+   820→   820→   820→  id              String   @id @default(cuid())
+   821→   821→   821→  userId          String
+   822→   822→   822→  symbol          String
+   823→   823→   823→  instrumentType  String   @default("stock") // stock, future, option
+   824→   824→   824→  name            String   @default("Untitled Analysis")
+   825→   825→   825→  timeframe       String   @default("1D")
+   826→   826→   826→  chartType       String   @default("candlestick")
+   827→   827→   827→  indicators      String   @default("[]") // JSON array
+   828→   828→   828→  drawings        String   @default("[]") // JSON array
+   829→   829→   829→  notes           String   @default("")
+   830→   830→   830→  createdAt       DateTime @default(now())
+   831→   831→   831→  updatedAt       DateTime @updatedAt
+   832→   832→   832→
+   833→   833→   833→  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+   834→   834→   834→  @@index([userId])
+   835→   835→   835→
+   836→   836→   836→  @@map("saved_analyses")
+   837→   837→   837→}
+   838→   838→   838→
+   839→   839→   839→// ============================================================
+   840→   840→   840→// SUBSCRIPTION TRANSACTIONS
+   841→   841→   841→// ============================================================
+   842→   842→   842→
+   843→   843→   843→model SubscriptionTransaction {
+   844→   844→   844→  id                  String   @id @default(cuid())
+   845→   845→   845→  userId              String
+   846→   846→   846→  plan                String
+   847→   847→   847→  amount              Int      @default(0) // in paise
+   848→   848→   848→  razorpayOrderId     String   @unique
+   849→   849→   849→  razorpayPaymentId   String?
+   850→   850→   850→  razorpaySignature   String?
+   851→   851→   851→  status              String   @default("created") // created, paid, failed, refunded
+   852→   852→   852→  startDate           DateTime
+   853→   853→   853→  endDate             DateTime
+   854→   854→   854→  createdAt           DateTime @default(now())
+   855→   855→   855→  updatedAt           DateTime @updatedAt
+   856→   856→   856→
+   857→   857→   857→  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+   858→   858→   858→  @@index([userId])
+   859→   859→   859→
+   860→   860→   860→  @@map("subscription_transactions")
+   861→   861→   861→}
+   862→   862→   862→
+   863→   863→   863→// ============================================================
+   864→   864→   864→// SUPPORT TICKETS
+   865→   865→   865→// ============================================================
+   866→   866→   866→
+   867→   867→   867→model SupportTicket {
+   868→   868→   868→  id              String   @id @default(cuid())
+   869→   869→   869→  userId          String
+   870→   870→   870→  subject         String
+   871→   871→   871→  message         String
+   872→   872→   872→  category        String   @default("GENERAL")
+   873→   873→   873→  priority        String   @default("MEDIUM")
+   874→   874→   874→  status          String   @default("OPEN") // OPEN, IN_PROGRESS, RESOLVED, CLOSED
+   875→   875→   875→  reply           String?
+   876→   876→   876→  repliedAt       DateTime?
+   877→   877→   877→  assignedTo      String?
+   878→   878→   878→  adminResponse   String?
+   879→   879→   879→  resolvedAt      String?
+   880→   880→   880→  closedAt        String?
+   881→   881→   881→  userAgent       String?
+   882→   882→   882→  pageUrl         String?
+   883→   883→   883→  attachments     String?  // JSON array
+   884→   884→   884→  createdAt       DateTime @default(now())
+   885→   885→   885→  updatedAt       DateTime @updatedAt
+   886→   886→   886→
+   887→   887→   887→  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+   888→   888→   888→  replies         TicketReply[]
+   889→   889→   889→  @@index([userId])
+   890→   890→   890→
+   891→   891→   891→  @@map("support_tickets")
+   892→   892→   892→}
+   893→   893→   893→
+   894→   894→   894→model TicketReply {
+   895→   895→   895→  id              String   @id @default(cuid())
+   896→   896→   896→  ticketId        String
+   897→   897→   897→  senderType      String   // USER, ADMIN
+   898→   898→   898→  senderId        String
+   899→   899→   899→  senderName      String
+   900→   900→   900→  message         String
+   901→   901→   901→  isInternal      Boolean  @default(false)
+   902→   902→   902→  createdAt       DateTime @default(now())
+   903→   903→   903→
+   904→   904→   904→  ticket          SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+   905→   905→   905→
+   906→   906→   906→  @@map("ticket_replies")
+   907→   907→   907→}
+   908→   908→   908→

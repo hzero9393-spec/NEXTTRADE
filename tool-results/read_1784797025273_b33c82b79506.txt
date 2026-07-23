@@ -1,0 +1,1936 @@
+     1→'use client'
+     2→
+     3→import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+     4→import {
+     5→  Card,
+     6→  CardContent,
+     7→} from '@/components/ui/card'
+     8→import { Button } from '@/components/ui/button'
+     9→import { Badge } from '@/components/ui/badge'
+    10→import { Skeleton } from '@/components/ui/skeleton'
+    11→import { Input } from '@/components/ui/input'
+    12→import {
+    13→  ArrowLeft,
+    14→  ArrowUpRight,
+    15→  ArrowDownRight,
+    16→  TrendingUp,
+    17→  TrendingDown,
+    18→  Info,
+    19→  ChevronDown,
+    20→  ChevronUp,
+    21→  Minus,
+    22→  Plus,
+    23→  Loader2,
+    24→  BarChart3,
+    25→  ShoppingCart,
+    26→  Activity,
+    27→  RefreshCw,
+    28→  Layers,
+    29→  Target,
+    30→  Gauge,
+    31→  Zap,
+    32→  Eye,
+    33→  Star,
+    34→} from 'lucide-react'
+    35→import { toast } from 'sonner'
+    36→import { useAuthStore } from '@/lib/auth-store'
+    37→import { useAppStore } from '@/lib/store'
+    38→import { useWatchlistStore } from '@/lib/watchlist-store'
+    39→import { useTradeSuccess } from '@/components/pepertect/trade-success-popup'
+    40→import { TradeConfirmModal, TradeConfirmData } from '@/components/pepertect/ui/trade-confirm-modal'
+    41→import { motion, AnimatePresence } from 'framer-motion'
+    42→import { formatINR, formatINRWhole, formatLargeNumber, formatVolume, formatPrice, formatPercent, calculateBrokerage } from '@/lib/format'
+    43→import { StockLogo } from '@/components/pepertect/ui/stock-logo'
+    44→import { useStockQuote } from '@/hooks/use-market-data'
+    45→import {
+    46→  AreaChart,
+    47→  Area,
+    48→  XAxis,
+    49→  YAxis,
+    50→  Tooltip,
+    51→  ResponsiveContainer,
+    52→  CartesianGrid,
+    53→} from 'recharts'
+    54→
+    55→// ─── Types ────────────────────────────────────────────────────────────────
+    56→
+    57→interface StockDetail {
+    58→  symbol: string
+    59→  name: string
+    60→  sector: string
+    61→  industry: string
+    62→  exchange: string
+    63→  isin: string | null
+    64→  currentPrice: number
+    65→  change: number
+    66→  changePercent: number
+    67→  open: number
+    68→  high: number
+    69→  low: number
+    70→  previousClose: number
+    71→  close: number
+    72→  volume: number
+    73→  totalTradedValue: number
+    74→  averageTradePrice: number
+    75→  week52High: number
+    76→  week52Low: number
+    77→  upperCircuit: number
+    78→  lowerCircuit: number
+    79→  marketCap: number
+    80→  peRatio: number | null
+    81→  eps: number
+    82→  dividendYield: number
+    83→  pbRatio: number
+    84→  roe: number
+    85→  bookValue: number
+    86→  debtToEquity: number
+    87→  faceValue: number
+    88→  industryPE: number
+    89→  lotSize: number
+    90→  isFuturesAvailable: boolean
+    91→  isOptionsAvailable: boolean
+    92→  isFnoBan: boolean
+    93→  strikeInterval: number | null
+    94→  deliveryQuantity: number | null
+    95→  deliveryPercentage: number | null
+    96→  vwap: number | null
+    97→  isRealData: boolean
+    98→  dataSource: 'upstox' | 'dhan' | 'yahoo' | 'database'
+    99→}
+   100→
+   101→interface SimilarStock {
+   102→  symbol: string
+   103→  name: string
+   104→  currentPrice: number
+   105→  change: number
+   106→  changePercent: number
+   107→  sector: string
+   108→}
+   109→
+   110→interface CandleData {
+   111→  date: string
+   112→  open: number
+   113→  high: number
+   114→  low: number
+   115→  close: number
+   116→  volume: number
+   117→}
+   118→
+   119→interface FutureContract {
+   120→  underlying: string
+   121→  expiryDate: string
+   122→  lotSize: number
+   123→  ltp: number
+   124→  change: number
+   125→  changePercent: number
+   126→  open: number
+   127→  high: number
+   128→  low: number
+   129→  previousClose: number
+   130→  volume: number
+   131→  oi: number
+   132→  oiChange: number
+   133→  basis: number
+   134→  basisPercent: number
+   135→}
+   136→
+   137→interface OptionChainItem {
+   138→  strikePrice: number
+   139→  expiryDate: string
+   140→  ceLtp: number
+   141→  ceChange: number
+   142→  ceChangePercent: number
+   143→  ceVolume: number
+   144→  ceOI: number
+   145→  ceOIChange: number
+   146→  ceIV: number
+   147→  ceDelta: number
+   148→  ceGamma: number
+   149→  ceTheta: number
+   150→  ceVega: number
+   151→  peLtp: number
+   152→  peChange: number
+   153→  peChangePercent: number
+   154→  peVolume: number
+   155→  peOI: number
+   156→  peOIChange: number
+   157→  peIV: number
+   158→  peDelta: number
+   159→  peGamma: number
+   160→  peTheta: number
+   161→  peVega: number
+   162→}
+   163→
+   164→interface FnoData {
+   165→  futures: FutureContract[]
+   166→  optionChain: OptionChainItem[]
+   167→  optionChainSummary: {
+   168→    totalCallOI: number
+   169→    totalPutOI: number
+   170→    pcr: number
+   171→    maxPain: number
+   172→    ivPercentile: number
+   173→    nearestExpiry: string
+   174→    availableExpiries: string[]
+   175→  }
+   176→  isRealData: boolean
+   177→  dataSource: 'upstox' | 'dhan' | 'database'
+   178→}
+   179→
+   180→type RangeOption = '1D' | '1W' | '1M' | '3M' | '6M' | '1Y' | '5Y'
+   181→type OverviewTab = 'overview' | 'fno' | 'technicals' | 'news'
+   182→
+   183→function formatDate(dateStr: string, range: RangeOption): string {
+   184→  const d = new Date(dateStr)
+   185→  if (range === '1D') return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false })
+   186→  if (range === '1W') return d.toLocaleDateString('en-IN', { weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false })
+   187→  if (range === '1M' || range === '3M') return d.toLocaleDateString('en-IN', { month: 'short', day: 'numeric' })
+   188→  return d.toLocaleDateString('en-IN', { month: 'short', year: '2-digit' })
+   189→}
+   190→
+   191→function formatExpiry(dateStr: string): string {
+   192→  if (!dateStr) return '--'
+   193→  const d = new Date(dateStr)
+   194→  return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+   195→}
+   196→
+   197→function getDataSourceBadge(dataSource: 'upstox' | 'dhan' | 'yahoo' | 'database') {
+   198→  switch (dataSource) {
+   199→    case 'upstox':
+   200→      return <Badge className="text-[9px] font-bold bg-[#00B386]/10 text-[#00B386] border-[#00B386]/20 border px-1.5 py-0">LIVE</Badge>
+   201→    case 'dhan':
+   202→      return <Badge className="text-[9px] font-bold bg-[#00B386]/10 text-[#00B386] border-[#00B386]/20 border px-1.5 py-0">LIVE</Badge>
+   203→    case 'yahoo':
+   204→      return <Badge className="text-[9px] font-bold bg-amber-500/10 text-amber-600 border-amber-500/20 border px-1.5 py-0">DELAYED</Badge>
+   205→    case 'database':
+   206→      return <Badge className="text-[9px] font-bold bg-gray-500/10 text-gray-500 border-gray-500/20 border px-1.5 py-0">DB</Badge>
+   207→  }
+   208→}
+   209→
+   210→// ─── Chart Tooltip ────────────────────────────────────────────────────────
+   211→
+   212→function CustomTooltip({ active, payload, range }: { active?: boolean; payload?: Array<{ payload: CandleData }>; range: RangeOption }) {
+   213→  if (!active || !payload || !payload.length) return null
+   214→  const d = payload[0].payload
+   215→  const isUp = d.close >= d.open
+   216→
+   217→  return (
+   218→    <div className="bg-card border border-border rounded-lg p-3 shadow-xl text-xs">
+   219→      <div className="font-semibold text-foreground mb-1.5">{formatDate(d.date, range)}</div>
+   220→      <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
+   221→        <span className="text-muted-foreground">Open</span>
+   222→        <span className="font-mono font-tabular text-right">{formatPrice(d.open)}</span>
+   223→        <span className="text-muted-foreground">High</span>
+   224→        <span className="font-mono font-tabular text-right">{formatPrice(d.high)}</span>
+   225→        <span className="text-muted-foreground">Low</span>
+   226→        <span className="font-mono font-tabular text-right">{formatPrice(d.low)}</span>
+   227→        <span className="text-muted-foreground">Close</span>
+   228→        <span className={`font-mono font-tabular text-right font-semibold ${isUp ? 'text-[#00B386]' : 'text-[#EB5B3C]'}`}>
+   229→          {formatPrice(d.close)}
+   230→        </span>
+   231→        {d.volume > 0 && (
+   232→          <>
+   233→            <span className="text-muted-foreground">Volume</span>
+   234→            <span className="font-mono font-tabular text-right">{formatVolume(d.volume)}</span>
+   235→          </>
+   236→        )}
+   237→      </div>
+   238→    </div>
+   239→  )
+   240→}
+   241→
+   242→// ─── Range Bar Component (Groww-style) ────────────────────────────────────
+   243→
+   244→function RangeBar({ label, low, high, current, lowLabel, highLabel }: {
+   245→  label: string
+   246→  low: number
+   247→  high: number
+   248→  current: number
+   249→  lowLabel?: string
+   250→  highLabel?: string
+   251→}) {
+   252→  const range = high - low
+   253→  const position = range > 0 ? Math.min(100, Math.max(0, ((current - low) / range) * 100)) : 50
+   254→
+   255→  return (
+   256→    <div className="space-y-2">
+   257→      <div className="flex items-center justify-between">
+   258→        <span className="text-xs text-muted-foreground">{lowLabel || label + ' Low'}</span>
+   259→        <span className="text-xs text-muted-foreground">{highLabel || label + ' High'}</span>
+   260→      </div>
+   261→      <div className="flex items-center justify-between text-sm font-mono font-tabular font-semibold">
+   262→        <span className="text-[#EB5B3C]">{formatPrice(low)}</span>
+   263→        <span className="text-[#00B386]">{formatPrice(high)}</span>
+   264→      </div>
+   265→      <div className="h-2 rounded-full bg-muted relative overflow-hidden">
+   266→        <div
+   267→          className="absolute top-0 left-0 h-full rounded-full"
+   268→          style={{
+   269→            width: '100%',
+   270→            background: 'linear-gradient(to right, #eb5b3c, #00d09c)',
+   271→            opacity: 0.25,
+   272→          }}
+   273→        />
+   274→        <div
+   275→          className="absolute top-1/2 -translate-y-1/2 size-3 bg-[#00d09c] border-2 border-white rounded-full shadow-sm z-10"
+   276→          style={{ left: `calc(${position}% - 6px)` }}
+   277→        />
+   278→      </div>
+   279→    </div>
+   280→  )
+   281→}
+   282→
+   283→// ─── Metric Row Component ─────────────────────────────────────────────────
+   284→
+   285→function MetricRow({ label, value, highlight }: { label: string; value: string; highlight?: 'green' | 'red' }) {
+   286→  return (
+   287→    <div className="flex items-center justify-between py-2.5 border-b border-border last:border-b-0">
+   288→      <span className="text-sm text-muted-foreground">{label}</span>
+   289→      <span className={`text-sm font-semibold font-mono font-tabular ${
+   290→        highlight === 'green' ? 'text-[#00B386]' : highlight === 'red' ? 'text-[#EB5B3C]' : 'text-foreground'
+   291→      }`}>{value}</span>
+   292→    </div>
+   293→  )
+   294→}
+   295→
+   296→// ─── Collapsible Section ──────────────────────────────────────────────────
+   297→
+   298→function CollapsibleSection({ title, children, defaultOpen = false }: {
+   299→  title: string
+   300→  children: React.ReactNode
+   301→  defaultOpen?: boolean
+   302→}) {
+   303→  const [open, setOpen] = useState(defaultOpen)
+   304→
+   305→  return (
+   306→    <div className="bg-card border border-border rounded-xl overflow-hidden">
+   307→      <button
+   308→        onClick={() => setOpen(!open)}
+   309→        className="w-full flex items-center justify-between px-5 py-4 hover:bg-card transition-colors"
+   310→      >
+   311→        <span className="text-sm font-semibold text-foreground">{title}</span>
+   312→        {open ? (
+   313→          <ChevronUp className="size-4 text-muted-foreground" />
+   314→        ) : (
+   315→          <ChevronDown className="size-4 text-muted-foreground" />
+   316→        )}
+   317→      </button>
+   318→      <AnimatePresence>
+   319→        {open && (
+   320→          <motion.div
+   321→            initial={{ height: 0, opacity: 0 }}
+   322→            animate={{ height: 'auto', opacity: 1 }}
+   323→            exit={{ height: 0, opacity: 0 }}
+   324→            transition={{ duration: 0.2 }}
+   325→            className="overflow-hidden"
+   326→          >
+   327→            <div className="px-5 pb-4">
+   328→              {children}
+   329→            </div>
+   330→          </motion.div>
+   331→        )}
+   332→      </AnimatePresence>
+   333→    </div>
+   334→  )
+   335→}
+   336→
+   337→// ─── Main Component ──────────────────────────────────────────────────────
+   338→
+   339→export function StockOverviewPage() {
+   340→  const { token, user } = useAuthStore()
+   341→  const { selectedStockSymbol, setCurrentPage, navigateToStock } = useAppStore()
+   342→  const { showTradeSuccess } = useTradeSuccess()
+   343→
+   344→  // WebSocket real-time quote for this stock
+   345→  const { quote: wsQuote, status: wsStatus } = useStockQuote(selectedStockSymbol || '')
+   346→
+   347→  // State
+   348→  const [stockDetail, setStockDetail] = useState<StockDetail | null>(null)
+   349→  const [similarStocks, setSimilarStocks] = useState<SimilarStock[]>([])
+   350→  const [chartData, setChartData] = useState<CandleData[]>([])
+   351→  const [range, setRange] = useState<RangeOption>('1M')
+   352→  const [overviewTab, setOverviewTab] = useState<OverviewTab>('overview')
+   353→  const [detailLoading, setDetailLoading] = useState(true)
+   354→  const [chartLoading, setChartLoading] = useState(true)
+   355→
+   356→  // F&O state
+   357→  const [fnoData, setFnoData] = useState<FnoData | null>(null)
+   358→  const [fnoLoading, setFnoLoading] = useState(false)
+   359→  const [selectedExpiry, setSelectedExpiry] = useState<string>('')
+   360→  const optionChainRef = useRef<HTMLDivElement>(null)
+   361→
+   362→  // Watchlist state - use shared store for instant sync
+   363→  const { isInWatchlist: isInWatchlistStore, addSymbol, removeSymbol, setSymbols: setWatchlistSymbols, loaded: watchlistLoaded } = useWatchlistStore()
+   364→  const isInWatchlist = isInWatchlistStore(selectedStockSymbol || '')
+   365→  const [watchlistLoading, setWatchlistLoading] = useState(false)
+   366→
+   367→  // Trade modal state
+   368→  const [showTradePanel, setShowTradePanel] = useState(false)
+   369→  const [orderSide, setOrderSide] = useState<'buy' | 'sell'>('buy')
+   370→  const [orderType, setOrderType] = useState('MARKET')
+   371→  const [productType, setProductType] = useState('INTRADAY')
+   372→  const [quantity, setQuantity] = useState(10)
+   373→  const [price, setPrice] = useState('')
+   374→  const [placingOrder, setPlacingOrder] = useState(false)
+   375→  const [tradeSegment, setTradeSegment] = useState<'EQUITY' | 'FUTURES' | 'OPTIONS'>('EQUITY')
+   376→  const [confirmModalOpen, setConfirmModalOpen] = useState(false)
+   377→  const [confirmData, setConfirmData] = useState<TradeConfirmData | null>(null)
+   378→
+   379→  // ─── Load watchlist into shared store ──────────────────────────
+   380→  useEffect(() => {
+   381→    if (!token || watchlistLoaded) return
+   382→    fetch('/api/trade/watchlist', {
+   383→      headers: { Authorization: `Bearer ${token}` },
+   384→    })
+   385→      .then(res => res.json())
+   386→      .then(data => {
+   387→        if (data.success && Array.isArray(data.data)) {
+   388→          setWatchlistSymbols(data.data.map((item: { symbol: string }) => item.symbol))
+   389→        }
+   390→      })
+   391→      .catch(() => { /* silent */ })
+   392→  }, [token, watchlistLoaded, setWatchlistSymbols])
+   393→
+   394→  // ─── Toggle watchlist ───────────────────────────────────────────
+   395→  const toggleWatchlist = async () => {
+   396→    if (!token || !stockDetail) return
+   397→    setWatchlistLoading(true)
+   398→    try {
+   399→      if (isInWatchlist) {
+   400→        const res = await fetch('/api/trade/watchlist', {
+   401→          method: 'DELETE',
+   402→          headers: {
+   403→            Authorization: `Bearer ${token}`,
+   404→            'Content-Type': 'application/json',
+   405→          },
+   406→          body: JSON.stringify({ symbol: stockDetail.symbol }),
+   407→        })
+   408→        const data = await res.json()
+   409→        if (data.success) {
+   410→          removeSymbol(stockDetail.symbol)
+   411→          toast.success(data.message || 'Removed from watchlist')
+   412→        } else {
+   413→          toast.error(data.error || 'Failed to remove')
+   414→        }
+   415→      } else {
+   416→        const res = await fetch('/api/trade/watchlist', {
+   417→          method: 'POST',
+   418→          headers: {
+   419→            Authorization: `Bearer ${token}`,
+   420→            'Content-Type': 'application/json',
+   421→          },
+   422→          body: JSON.stringify({ symbol: stockDetail.symbol }),
+   423→        })
+   424→        const data = await res.json()
+   425→        if (data.success) {
+   426→          addSymbol(stockDetail.symbol)
+   427→          toast.success(data.message || 'Added to watchlist')
+   428→        } else {
+   429→          toast.error(data.error || 'Failed to add')
+   430→        }
+   431→      }
+   432→    } catch {
+   433→      toast.error('Network error')
+   434→    } finally {
+   435→      setWatchlistLoading(false)
+   436→    }
+   437→  }
+   438→
+   439→  // ─── Fetch stock detail ─────────────────────────────────────────
+   440→  const fetchDetail = useCallback(async (isBackgroundRefresh = false) => {
+   441→    if (!selectedStockSymbol) return
+   442→    if (!isBackgroundRefresh) setDetailLoading(true)
+   443→    try {
+   444→      const res = await fetch(`/api/stocks/detail/${selectedStockSymbol}`)
+   445→      if (res.ok) {
+   446→        const json = await res.json()
+   447→        if (json.success) {
+   448→          setStockDetail(json.data)
+   449→          setSimilarStocks(json.similarStocks || [])
+   450→        }
+   451→      }
+   452→    } catch {
+   453→      // Keep previous data
+   454→    } finally {
+   455→      if (!isBackgroundRefresh) setDetailLoading(false)
+   456→    }
+   457→  }, [selectedStockSymbol])
+   458→
+   459→  // ─── Fetch chart data ───────────────────────────────────────────
+   460→  const fetchChart = useCallback(async () => {
+   461→    if (!selectedStockSymbol) return
+   462→    setChartLoading(true)
+   463→    try {
+   464→      const basePrice = stockDetail?.currentPrice || 1500
+   465→      const res = await fetch(`/api/stocks/chart/${selectedStockSymbol}?range=${range}&basePrice=${basePrice}`)
+   466→      if (res.ok) {
+   467→        const json = await res.json()
+   468→        if (json.success) setChartData(json.data || [])
+   469→      }
+   470→    } catch {
+   471→      // Keep previous data
+   472→    } finally {
+   473→      setChartLoading(false)
+   474→    }
+   475→  }, [selectedStockSymbol, range, stockDetail?.currentPrice])
+   476→
+   477→  // ─── Fetch F&O data ─────────────────────────────────────────────
+   478→  const fetchFnoData = useCallback(async () => {
+   479→    if (!selectedStockSymbol) return
+   480→    setFnoLoading(true)
+   481→    try {
+   482→      const res = await fetch(`/api/stocks/fno/${selectedStockSymbol}`)
+   483→      if (res.ok) {
+   484→        const json = await res.json()
+   485→        if (json.success && json.data) {
+   486→          setFnoData(json.data)
+   487→          if (json.data.optionChainSummary?.nearestExpiry && !selectedExpiry) {
+   488→            setSelectedExpiry(json.data.optionChainSummary.nearestExpiry)
+   489→          }
+   490→        }
+   491→      }
+   492→    } catch {
+   493→      // Keep previous data
+   494→    } finally {
+   495→      setFnoLoading(false)
+   496→    }
+   497→  }, [selectedStockSymbol, selectedExpiry])
+   498→
+   499→  useEffect(() => {
+   500→    fetchDetail()
+   501→  }, [fetchDetail])
+   502→
+   503→  useEffect(() => {
+   504→    fetchChart()
+   505→  }, [fetchChart])
+   506→
+   507→  // WebSocket: Merge real-time stock price updates
+   508→  // This replaces the 2s polling - WebSocket pushes data every 500ms
+   509→  useEffect(() => {
+   510→    if (!wsQuote || wsQuote.last_price <= 0 || !stockDetail) return
+   511→
+   512→    const previousClose = wsQuote.ohlc.close - wsQuote.net_change
+   513→    const changePercent = previousClose > 0 ? (wsQuote.net_change / previousClose) * 100 : stockDetail.changePercent
+   514→
+   515→    setStockDetail(prev => {
+   516→      if (!prev) return prev
+   517→      return {
+   518→        ...prev,
+   519→        currentPrice: wsQuote.last_price,
+   520→        change: wsQuote.net_change,
+   521→        changePercent,
+   522→        open: wsQuote.ohlc.open || prev.open,
+   523→        high: wsQuote.ohlc.high || prev.high,
+   524→        low: wsQuote.ohlc.low || prev.low,
+   525→        close: wsQuote.ohlc.close || prev.close,
+   526→        previousClose,
+   527→        volume: wsQuote.volume || prev.volume,
+   528→      }
+   529→    })
+   530→  }, [wsQuote])
+   531→
+   532→  // Fallback: REST polling only when WebSocket is disconnected (10s, not 1s)
+   533→  useEffect(() => {
+   534→    if (wsStatus === 'connected') return // No need for REST polling when WS is active
+   535→    const interval = setInterval(() => fetchDetail(true), 10000)
+   536→    return () => clearInterval(interval)
+   537→  }, [fetchDetail, wsStatus])
+   538→
+   539→  // Fetch F&O data when F&O tab is active or when stock has F&O
+   540→  useEffect(() => {
+   541→    if (stockDetail && (stockDetail.isFuturesAvailable || stockDetail.isOptionsAvailable)) {
+   542→      fetchFnoData()
+   543→    }
+   544→  }, [stockDetail?.isFuturesAvailable, stockDetail?.isOptionsAvailable, fetchFnoData])
+   545→
+   546→  // Auto-refresh F&O data every 10s when F&O tab is active (reduced from 5s)
+   547→  useEffect(() => {
+   548→    if (overviewTab !== 'fno') return
+   549→    const interval = setInterval(fetchFnoData, 10000)
+   550→    return () => clearInterval(interval)
+   551→  }, [overviewTab, fetchFnoData])
+   552→
+   553→  // Set price when stock changes
+   554→  useEffect(() => {
+   555→    if (stockDetail) {
+   556→      setPrice(stockDetail.currentPrice.toFixed(2))
+   557→    }
+   558→  }, [stockDetail?.currentPrice])
+   559→
+   560→  // ─── Derived values ─────────────────────────────────────────────
+   561→  const isPositive = stockDetail ? stockDetail.change >= 0 : true
+   562→  const gradientId = `stock-gradient-${selectedStockSymbol}`
+   563→
+   564→  const chartDataFormatted = useMemo(() => {
+   565→    return chartData.map((d) => ({
+   566→      ...d,
+   567→      dateLabel: formatDate(d.date, range),
+   568→    }))
+   569→  }, [chartData, range])
+   570→
+   571→  const chartMinMax = useMemo(() => {
+   572→    if (chartDataFormatted.length === 0) return { min: 0, max: 0 }
+   573→    const prices = chartDataFormatted.flatMap((d) => [d.high, d.low])
+   574→    return {
+   575→      min: Math.min(...prices) * 0.999,
+   576→      max: Math.max(...prices) * 1.001,
+   577→    }
+   578→  }, [chartDataFormatted])
+   579→
+   580→  // ─── Option chain quick view ────────────────────────────────────
+   581→  const atmStrike = useMemo(() => {
+   582→    if (!stockDetail || !fnoData?.optionChain?.length) return 0
+   583→    const strikes = fnoData.optionChain.map(o => o.strikePrice)
+   584→    return strikes.reduce((prev, curr) =>
+   585→      Math.abs(curr - stockDetail.currentPrice) < Math.abs(prev - stockDetail.currentPrice) ? curr : prev
+   586→    )
+   587→  }, [stockDetail?.currentPrice, fnoData?.optionChain])
+   588→
+   589→  const filteredOptionChain = useMemo(() => {
+   590→    if (!fnoData?.optionChain?.length || !atmStrike) return []
+   591→    const chain = selectedExpiry
+   592→      ? fnoData.optionChain.filter(o => o.expiryDate === selectedExpiry)
+   593→      : fnoData.optionChain
+   594→    if (!chain.length) return fnoData.optionChain
+   595→    const sorted = [...chain].sort((a, b) => a.strikePrice - b.strikePrice)
+   596→    const atmIndex = sorted.findIndex(o => o.strikePrice === atmStrike)
+   597→    if (atmIndex === -1) return sorted.slice(0, 11)
+   598→    const start = Math.max(0, atmIndex - 5)
+   599→    const end = Math.min(sorted.length, atmIndex + 6)
+   600→    return sorted.slice(start, end)
+   601→  }, [fnoData?.optionChain, atmStrike, selectedExpiry])
+   602→
+   603→  // ─── Order calculations ─────────────────────────────────────────
+   604→  const estimatedTotal = useMemo(() => {
+   605→    const p = orderType === 'MARKET'
+   606→      ? (stockDetail?.currentPrice ?? 0)
+   607→      : (parseFloat(price) || 0)
+   608→    return quantity * p
+   609→  }, [quantity, price, orderType, stockDetail?.currentPrice])
+   610→
+   611→  const estimatedBrokerage = useMemo(() => {
+   612→    return calculateBrokerage(estimatedTotal)
+   613→  }, [estimatedTotal])
+   614→
+   615→  const availableBalance = user?.virtualBalance ?? 0
+   616→  const buyingPower = availableBalance * 5 // 5x margin
+   617→
+   618→  // ─── Handle place order ─────────────────────────────────────────
+   619→  const handlePlaceOrder = async () => {
+   620→    if (!token || !stockDetail) return
+   621→
+   622→    if (orderType === 'LIMIT' && (!price || parseFloat(price) <= 0)) {
+   623→      toast.error('Please enter a valid price for LIMIT orders')
+   624→      return
+   625→    }
+   626→
+   627→    if (quantity <= 0) {
+   628→      toast.error('Quantity must be at least 1')
+   629→      return
+   630→    }
+   631→
+   632→    // Open confirmation modal
+   633→    const direction = orderSide === 'buy' ? 'BUY' : 'SELL'
+   634→    const fillPrice = orderType === 'MARKET' ? stockDetail.currentPrice : parseFloat(price)
+   635→    setConfirmData({
+   636→      symbol: stockDetail.symbol,
+   637→      direction: direction as 'BUY' | 'SELL',
+   638→      segment: tradeSegment,
+   639→      productType,
+   640→      orderType,
+   641→      quantity,
+   642→      price: fillPrice,
+   643→      totalValue: estimatedTotal,
+   644→      brokerage: estimatedBrokerage,
+   645→      availableBalance,
+   646→    })
+   647→    setConfirmModalOpen(true)
+   648→  }
+   649→
+   650→  const executeTrade = async (): Promise<{ success: boolean; message?: string; error?: string; orderId?: string; balance?: number; totalValue?: number; brokerage?: number }> => {
+   651→    if (!token || !stockDetail) return { success: false, error: 'No stock selected' }
+   652→
+   653→    const direction = orderSide === 'buy' ? 'BUY' : 'SELL'
+   654→    const body: Record<string, unknown> = {
+   655→      symbol: stockDetail.symbol,
+   656→      direction,
+   657→      orderType,
+   658→      segment: tradeSegment,
+   659→      productType,
+   660→      quantity,
+   661→    }
+   662→
+   663→    if (orderType === 'LIMIT' && price) {
+   664→      body.price = parseFloat(price)
+   665→    }
+   666→
+   667→    if (tradeSegment === 'FUTURES') {
+   668→      body.lotSize = stockDetail.lotSize
+   669→      body.lots = Math.max(1, Math.round(quantity / stockDetail.lotSize))
+   670→      // Pass nearest expiry from F&O data if available
+   671→      if (fnoData?.optionChainSummary?.nearestExpiry) {
+   672→        body.expiryDate = fnoData.optionChainSummary.nearestExpiry
+   673→      }
+   674→    }
+   675→
+   676→    if (tradeSegment === 'OPTIONS') {
+   677→      body.lotSize = stockDetail.lotSize
+   678→      body.lots = Math.max(1, Math.round(quantity / stockDetail.lotSize))
+   679→      // Options require optionType and strikePrice — use ATM strike + CE as defaults
+   680→      if (atmStrike > 0) {
+   681→        body.strikePrice = atmStrike
+   682→        body.optionType = orderSide === 'buy' ? 'CE' : 'PE'
+   683→      }
+   684→      if (fnoData?.optionChainSummary?.nearestExpiry) {
+   685→        body.expiryDate = fnoData.optionChainSummary.nearestExpiry
+   686→      }
+   687→    }
+   688→
+   689→    try {
+   690→      const res = await fetch('/api/trade/place', {
+   691→        method: 'POST',
+   692→        headers: {
+   693→          Authorization: `Bearer ${token}`,
+   694→          'Content-Type': 'application/json',
+   695→        },
+   696→        body: JSON.stringify(body),
+   697→      })
+   698→
+   699→      const data = await res.json()
+   700→
+   701→      if (res.ok && data.success) {
+   702→        const fillPrice = orderType === 'MARKET' ? stockDetail.currentPrice : parseFloat(price)
+   703→        showTradeSuccess({
+   704→          symbol: stockDetail.symbol,
+   705→          type: direction as 'BUY' | 'SELL',
+   706→          qty: quantity,
+   707→          price: fillPrice,
+   708→          time: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase(),
+   709→          orderId: data.order?.id?.slice(-8).toUpperCase() || 'N/A',
+   710→          segment: tradeSegment,
+   711→          totalValue: data.order?.totalValue,
+   712→          brokerage: data.order?.brokerage,
+   713→        })
+   714→        setShowTradePanel(false)
+   715→        return {
+   716→          success: true,
+   717→          orderId: data.order?.id?.slice(-8).toUpperCase() || 'N/A',
+   718→          balance: data.balance,
+   719→          totalValue: data.order?.totalValue,
+   720→          brokerage: data.order?.brokerage,
+   721→        }
+   722→      } else {
+   723→        return { success: false, error: data.error || 'Failed to place order' }
+   724→      }
+   725→    } catch {
+   726→      return { success: false, error: 'Network error placing order' }
+   727→    }
+   728→  }
+   729→
+   730→  // ─── After trade confirm success callback ────────────────────────
+   731→  const handleTradeConfirmSuccess = useCallback(() => {
+   732→    // Redirect to positions page immediately
+   733→    setCurrentPage('positions')
+   734→  }, [setCurrentPage])
+   735→
+   736→
+   737→  // ─── Loading state ──────────────────────────────────────────────
+   738→  if (detailLoading && !stockDetail) {
+   739→    return (
+   740→      <div className="min-h-screen bg-background px-4 sm:px-6 lg:px-8 py-6">
+   741→        <div className="max-w-4xl mx-auto space-y-6">
+   742→          <Skeleton className="h-10 w-32 bg-muted" />
+   743→          <div className="space-y-2">
+   744→            <Skeleton className="h-8 w-48 bg-muted" />
+   745→            <Skeleton className="h-6 w-36 bg-muted" />
+   746→          </div>
+   747→          <Skeleton className="h-[300px] w-full bg-muted rounded-xl" />
+   748→          <Skeleton className="h-40 w-full bg-muted rounded-xl" />
+   749→          <Skeleton className="h-60 w-full bg-muted rounded-xl" />
+   750→        </div>
+   751→      </div>
+   752→    )
+   753→  }
+   754→
+   755→  if (!stockDetail) {
+   756→    return (
+   757→      <div className="min-h-screen bg-background px-4 sm:px-6 lg:px-8 py-6">
+   758→        <div className="max-w-4xl mx-auto flex flex-col items-center justify-center py-20">
+   759→          <p className="text-foreground font-semibold">Stock not found</p>
+   760→          <Button
+   761→            className="mt-4 bg-[#00D09C] hover:bg-[#00b88a] text-white font-semibold rounded-lg"
+   762→            onClick={() => setCurrentPage('trading')}
+   763→          >
+   764→            Back to Stocks
+   765→          </Button>
+   766→        </div>
+   767→      </div>
+   768→    )
+   769→  }
+   770→
+   771→  // Determine visible tabs
+   772→  const showFnoTab = stockDetail.isFuturesAvailable || stockDetail.isOptionsAvailable
+   773→  const tabs: OverviewTab[] = ['overview', ...(showFnoTab ? ['fno' as OverviewTab] : []), 'technicals', 'news']
+   774→
+   775→  return (
+   776→    <div className="min-h-screen bg-background">
+   777→      {/* ═══ Sticky Header ═════════════════════════════════════════════ */}
+   778→      <div className="sticky top-14 z-30 bg-card border-b border-border">
+   779→        <div className="px-4 sm:px-6 lg:px-8 py-3">
+   780→          <div className="max-w-4xl mx-auto flex items-center justify-between">
+   781→            <div className="flex items-center gap-3 min-w-0">
+   782→              <button
+   783→                onClick={() => setCurrentPage('trading')}
+   784→                className="size-8 flex-shrink-0 flex items-center justify-center rounded-lg hover:bg-background text-muted-foreground hover:text-foreground transition-colors"
+   785→              >
+   786→                <ArrowLeft className="size-5" />
+   787→              </button>
+   788→              <StockLogo symbol={stockDetail.symbol} name={stockDetail.name} sector={stockDetail.sector} size="lg" />
+   789→              <div className="min-w-0">
+   790→                <div className="flex items-center gap-2">
+   791→                  <h1 className="text-lg font-bold text-foreground truncate">{stockDetail.name}</h1>
+   792→                  <span className="text-[10px] font-bold bg-background text-muted-foreground px-2 py-0.5 rounded-md flex-shrink-0">
+   793→                    {stockDetail.exchange}
+   794→                  </span>
+   795→                  {getDataSourceBadge(stockDetail.dataSource)}
+   796→                  {wsStatus === 'connected' && (
+   797→                    <span className="flex items-center gap-1 text-[9px] font-bold bg-[#00D09C]/10 text-[#00D09C] px-1.5 py-0.5 rounded-full">
+   798→                      <Zap className="size-2.5" />
+   799→                      LIVE
+   800→                    </span>
+   801→                  )}
+   802→                </div>
+   803→                <div className="flex items-center gap-2 mt-0.5">
+   804→                  <span className="text-2xl font-bold font-mono font-tabular text-foreground">
+   805→                    {formatPrice(stockDetail.currentPrice)}
+   806→                  </span>
+   807→                  <span className={`flex items-center gap-0.5 text-sm font-semibold ${isPositive ? 'text-[#00B386]' : 'text-[#EB5B3C]'}`}>
+   808→                    {isPositive ? <ArrowUpRight className="size-3.5" /> : <ArrowDownRight className="size-3.5" />}
+   809→                    {stockDetail.change >= 0 ? '+' : ''}{formatPrice(stockDetail.change)} ({formatPercent(stockDetail.changePercent)})
+   810→                  </span>
+   811→                </div>
+   812→              </div>
+   813→            </div>
+   814→            <div className="flex items-center gap-2 flex-shrink-0">
+   815→              {/* Watchlist Toggle */}
+   816→              <Button
+   817→                variant="outline"
+   818→                size="sm"
+   819→                className={`gap-1.5 rounded-lg font-semibold ${
+   820→                  isInWatchlist
+   821→                    ? 'border-[#00D09C]/30 text-[#00D09C] bg-[#00D09C]/5 hover:bg-[#00D09C]/10'
+   822→                    : 'border-border text-muted-foreground hover:text-[#00D09C] hover:border-[#00D09C]/30'
+   823→                }`}
+   824→                onClick={toggleWatchlist}
+   825→                disabled={watchlistLoading}
+   826→              >
+   827→                <Star className={`size-4 ${isInWatchlist ? 'fill-[#00D09C]' : ''}`} />
+   828→              </Button>
+   829→              {(stockDetail.isFuturesAvailable || stockDetail.isOptionsAvailable) && (
+   830→                <Badge variant="outline" className="text-[10px] font-bold border-[#00D09C]/30 text-[#00D09C]">
+   831→                  F&O
+   832→                </Badge>
+   833→              )}
+   834→              {stockDetail.isFnoBan && (
+   835→                <Badge variant="outline" className="text-[10px] font-bold border-[#eb5b3c]/30 text-[#EB5B3C]">
+   836→                  F&O BAN
+   837→                </Badge>
+   838→              )}
+   839→              <Button
+   840→                className="bg-[#00D09C] hover:bg-[#00b88a] text-white font-semibold rounded-lg gap-1.5"
+   841→                size="sm"
+   842→                onClick={() => { setOrderSide('buy'); setTradeSegment('EQUITY'); setShowTradePanel(true) }}
+   843→              >
+   844→                <ShoppingCart className="size-4" />
+   845→                <span className="hidden sm:inline">Buy</span>
+   846→              </Button>
+   847→              <Button
+   848→                className="bg-[#EB5B3C] hover:bg-[#d44f33] text-white font-semibold rounded-lg gap-1.5"
+   849→                size="sm"
+   850→                onClick={() => { setOrderSide('sell'); setTradeSegment('EQUITY'); setShowTradePanel(true) }}
+   851→              >
+   852→                <span className="hidden sm:inline">Sell</span>
+   853→              </Button>
+   854→            </div>
+   855→          </div>
+   856→        </div>
+   857→
+   858→        {/* Tabs */}
+   859→        <div className="px-4 sm:px-6 lg:px-8">
+   860→          <div className="max-w-4xl mx-auto flex items-center gap-1 overflow-x-auto">
+   861→            {tabs.map((tab) => (
+   862→              <button
+   863→                key={tab}
+   864→                onClick={() => setOverviewTab(tab)}
+   865→                className={`px-4 py-2.5 text-sm font-semibold capitalize border-b-2 transition-all whitespace-nowrap ${
+   866→                  overviewTab === tab
+   867→                    ? 'text-[#00D09C] border-[#00D09C]'
+   868→                    : 'text-muted-foreground border-transparent hover:text-foreground'
+   869→                }`}
+   870→              >
+   871→                {tab === 'fno' ? 'F&O' : tab}
+   872→              </button>
+   873→            ))}
+   874→          </div>
+   875→        </div>
+   876→      </div>
+   877→
+   878→      {/* ═══ Main Content ═════════════════════════════════════════════ */}
+   879→      <div className="px-4 sm:px-6 lg:px-8 py-6">
+   880→        <div className="max-w-4xl mx-auto space-y-6">
+   881→
+   882→          {/* ═══════════════════════════════════════════════════════════════
+   883→              OVERVIEW TAB
+   884→          ═══════════════════════════════════════════════════════════════ */}
+   885→          {overviewTab === 'overview' && (
+   886→            <motion.div
+   887→              initial={{ opacity: 0, y: 10 }}
+   888→              animate={{ opacity: 1, y: 0 }}
+   889→              transition={{ duration: 0.3 }}
+   890→              className="space-y-6"
+   891→            >
+   892→              {/* ─── Chart Card ──────────────────────────────────────── */}
+   893→              <Card className="bg-card border border-border rounded-xl shadow-sm">
+   894→                <CardContent className="p-5">
+   895→                  {/* Range Selector */}
+   896→                  <div className="flex items-center justify-between mb-4">
+   897→                    <div className="flex items-center gap-1 overflow-x-auto pb-1">
+   898→                      <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mr-2 flex-shrink-0">NSE</span>
+   899→                      {(['1D', '1W', '1M', '3M', '6M', '1Y', '5Y'] as RangeOption[]).map((r) => (
+   900→                        <button
+   901→                          key={r}
+   902→                          onClick={() => setRange(r)}
+   903→                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex-shrink-0 ${
+   904→                            range === r
+   905→                              ? 'bg-[#00D09C] text-white shadow-sm'
+   906→                              : 'text-muted-foreground hover:bg-background hover:text-foreground'
+   907→                          }`}
+   908→                        >
+   909→                          {r}
+   910→                        </button>
+   911→                      ))}
+   912→                    </div>
+   913→                  </div>
+   914→
+   915→                  {/* Chart */}
+   916→                  <div className="rounded-xl overflow-hidden">
+   917→                    {chartLoading ? (
+   918→                      <div className="h-[280px] flex items-center justify-center">
+   919→                        <div className="flex flex-col items-center gap-3">
+   920→                          <div className="flex gap-1.5">
+   921→                            <div className="size-2 rounded-full bg-[#00D09C] animate-bounce" style={{ animationDelay: '0ms' }} />
+   922→                            <div className="size-2 rounded-full bg-[#00D09C] animate-bounce" style={{ animationDelay: '150ms' }} />
+   923→                            <div className="size-2 rounded-full bg-[#00D09C] animate-bounce" style={{ animationDelay: '300ms' }} />
+   924→                          </div>
+   925→                          <span className="text-xs text-muted-foreground">Loading chart...</span>
+   926→                        </div>
+   927→                      </div>
+   928→                    ) : chartDataFormatted.length > 0 ? (
+   929→                      <div className="h-[280px]">
+   930→                        <ResponsiveContainer width="100%" height="100%">
+   931→                          <AreaChart data={chartDataFormatted} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+   932→                            <defs>
+   933→                              <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+   934→                                <stop offset="5%" stopColor={isPositive ? '#00d09c' : '#eb5b3c'} stopOpacity={0.3} />
+   935→                                <stop offset="95%" stopColor={isPositive ? '#00d09c' : '#eb5b3c'} stopOpacity={0} />
+   936→                              </linearGradient>
+   937→                            </defs>
+   938→                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(128,128,128,0.1)" />
+   939→                            <XAxis
+   940→                              dataKey="dateLabel"
+   941→                              tick={{ fontSize: 10, fill: '#6b7280' }}
+   942→                              axisLine={{ stroke: 'rgba(128,128,128,0.2)' }}
+   943→                              tickLine={false}
+   944→                              interval="preserveStartEnd"
+   945→                            />
+   946→                            <YAxis
+   947→                              domain={[chartMinMax.min, chartMinMax.max]}
+   948→                              tick={{ fontSize: 10, fill: '#6b7280' }}
+   949→                              axisLine={false}
+   950→                              tickLine={false}
+   951→                              tickFormatter={(v: number) => formatINRWhole(v)}
+   952→                              width={60}
+   953→                            />
+   954→                            <Tooltip content={<CustomTooltip range={range} />} />
+   955→                            <Area
+   956→                              type="monotone"
+   957→                              dataKey="close"
+   958→                              stroke={isPositive ? '#00d09c' : '#eb5b3c'}
+   959→                              strokeWidth={2}
+   960→                              fill={`url(#${gradientId})`}
+   961→                              dot={false}
+   962→                              activeDot={{ r: 4, strokeWidth: 2, stroke: '#fff' }}
+   963→                            />
+   964→                          </AreaChart>
+   965→                        </ResponsiveContainer>
+   966→                      </div>
+   967→                    ) : (
+   968→                      <div className="h-[280px] flex items-center justify-center text-muted-foreground text-sm">
+   969→                        No chart data available
+   970→                      </div>
+   971→                    )}
+   972→                  </div>
+   973→                </CardContent>
+   974→              </Card>
+   975→
+   976→              {/* ─── Performance Section ──────────────────────────────── */}
+   977→              <Card className="bg-card border border-border rounded-xl shadow-sm">
+   978→                <CardContent className="p-5 space-y-5">
+   979→                  <div className="flex items-center gap-2">
+   980→                    <h3 className="text-base font-semibold text-foreground">Performance</h3>
+   981→                    <Info className="size-3.5 text-muted-foreground" />
+   982→                  </div>
+   983→
+   984→                  {/* Today's Range */}
+   985→                  {stockDetail.low > 0 && stockDetail.high > 0 && (
+   986→                    <RangeBar
+   987→                      label="Today's"
+   988→                      low={stockDetail.low}
+   989→                      high={stockDetail.high}
+   990→                      current={stockDetail.currentPrice}
+   991→                      lowLabel="Today's Low"
+   992→                      highLabel="Today's High"
+   993→                    />
+   994→                  )}
+   995→
+   996→                  {/* 52 Week Range */}
+   997→                  {stockDetail.week52Low > 0 && stockDetail.week52High > 0 && (
+   998→                    <RangeBar
+   999→                      label="52 Week"
+  1000→                      low={stockDetail.week52Low}
+  1001→                      high={stockDetail.week52High}
+  1002→                      current={stockDetail.currentPrice}
+  1003→                      lowLabel="52 Week Low"
+  1004→                      highLabel="52 Week High"
+  1005→                    />
+  1006→                  )}
+  1007→
+  1008→                  {/* Key Metrics Grid */}
+  1009→                  <div className="grid grid-cols-3 sm:grid-cols-6 gap-4 pt-2">
+  1010→                    <div className="text-center">
+  1011→                      <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Open</p>
+  1012→                      <p className="text-sm font-bold font-mono font-tabular text-foreground mt-1">
+  1013→                        {stockDetail.open > 0 ? formatPrice(stockDetail.open) : '--'}
+  1014→                      </p>
+  1015→                    </div>
+  1016→                    <div className="text-center">
+  1017→                      <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Prev Close</p>
+  1018→                      <p className="text-sm font-bold font-mono font-tabular text-foreground mt-1">
+  1019→                        {stockDetail.previousClose > 0 ? formatPrice(stockDetail.previousClose) : '--'}
+  1020→                      </p>
+  1021→                    </div>
+  1022→                    <div className="text-center">
+  1023→                      <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Volume</p>
+  1024→                      <p className="text-sm font-bold font-mono font-tabular text-foreground mt-1">
+  1025→                        {stockDetail.volume > 0 ? formatVolume(stockDetail.volume) : '--'}
+  1026→                      </p>
+  1027→                    </div>
+  1028→                    <div className="text-center">
+  1029→                      <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">VWAP</p>
+  1030→                      <p className="text-sm font-bold font-mono font-tabular text-foreground mt-1">
+  1031→                        {stockDetail.vwap ? formatPrice(stockDetail.vwap) : '--'}
+  1032→                      </p>
+  1033→                    </div>
+  1034→                    <div className="text-center">
+  1035→                      <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Avg Price</p>
+  1036→                      <p className="text-sm font-bold font-mono font-tabular text-foreground mt-1">
+  1037→                        {stockDetail.averageTradePrice > 0 ? formatPrice(stockDetail.averageTradePrice) : '--'}
+  1038→                      </p>
+  1039→                    </div>
+  1040→                    <div className="text-center">
+  1041→                      <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Traded Value</p>
+  1042→                      <p className="text-sm font-bold font-mono font-tabular text-foreground mt-1">
+  1043→                        {stockDetail.totalTradedValue > 0 ? formatLargeNumber(stockDetail.totalTradedValue) : '--'}
+  1044→                      </p>
+  1045→                    </div>
+  1046→                  </div>
+  1047→                </CardContent>
+  1048→              </Card>
+  1049→
+  1050→              {/* ─── Circuit Limits Card ─────────────────────────────── */}
+  1051→              {(stockDetail.upperCircuit > 0 || stockDetail.lowerCircuit > 0) && (
+  1052→                <Card className="bg-card border border-border rounded-xl shadow-sm">
+  1053→                  <CardContent className="p-5">
+  1054→                    <h3 className="text-base font-semibold text-foreground mb-4">Circuit Limits</h3>
+  1055→                    <div className="grid grid-cols-2 gap-6">
+  1056→                      <div className="space-y-2">
+  1057→                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Upper Circuit</p>
+  1058→                        <div className="flex items-center gap-2">
+  1059→                          <div className="size-3 rounded-full bg-[#00d09c]" />
+  1060→                          <span className="text-lg font-bold font-mono font-tabular text-[#00B386]">
+  1061→                            {formatPrice(stockDetail.upperCircuit)}
+  1062→                          </span>
+  1063→                        </div>
+  1064→                        {stockDetail.currentPrice > 0 && (
+  1065→                          <p className="text-xs text-muted-foreground">
+  1066→                            {formatPercent((stockDetail.upperCircuit - stockDetail.currentPrice) / stockDetail.currentPrice * 100)} away
+  1067→                          </p>
+  1068→                        )}
+  1069→                      </div>
+  1070→                      <div className="space-y-2">
+  1071→                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Lower Circuit</p>
+  1072→                        <div className="flex items-center gap-2">
+  1073→                          <div className="size-3 rounded-full bg-[#eb5b3c]" />
+  1074→                          <span className="text-lg font-bold font-mono font-tabular text-[#EB5B3C]">
+  1075→                            {formatPrice(stockDetail.lowerCircuit)}
+  1076→                          </span>
+  1077→                        </div>
+  1078→                        {stockDetail.currentPrice > 0 && (
+  1079→                          <p className="text-xs text-muted-foreground">
+  1080→                            {formatPercent((stockDetail.currentPrice - stockDetail.lowerCircuit) / stockDetail.currentPrice * 100)} away
+  1081→                          </p>
+  1082→                        )}
+  1083→                      </div>
+  1084→                    </div>
+  1085→                    {/* Visual bar */}
+  1086→                    <div className="mt-4 relative">
+  1087→                      {stockDetail.upperCircuit > stockDetail.lowerCircuit && (
+  1088→                        <>
+  1089→                          <div className="h-3 rounded-full bg-gradient-to-r from-[#eb5b3c]/20 via-[#f0f2f5] to-[#00d09c]/20" />
+  1090→                          <div
+  1091→                            className="absolute top-1/2 -translate-y-1/2 size-3.5 bg-[#1a1a1a] border-2 border-white rounded-full shadow-sm z-10"
+  1092→                            style={{
+  1093→                              left: `${((stockDetail.currentPrice - stockDetail.lowerCircuit) / (stockDetail.upperCircuit - stockDetail.lowerCircuit)) * 100}%`,
+  1094→                              transform: 'translate(-50%, -50%)'
+  1095→                            }}
+  1096→                          />
+  1097→                        </>
+  1098→                      )}
+  1099→                    </div>
+  1100→                  </CardContent>
+  1101→                </Card>
+  1102→              )}
+  1103→
+  1104→              {/* ─── Fundamentals Section ─────────────────────────────── */}
+  1105→              <CollapsibleSection title="Fundamentals" defaultOpen={true}>
+  1106→                <div className="grid grid-cols-2 gap-x-6">
+  1107→                  <MetricRow label="Mkt Cap" value={formatLargeNumber(stockDetail.marketCap)} />
+  1108→                  <MetricRow label="ROE" value={stockDetail.roe ? `${stockDetail.roe.toFixed(2)}%` : '--'} highlight={stockDetail.roe > 15 ? 'green' : stockDetail.roe < 10 ? 'red' : undefined} />
+  1109→                  <MetricRow label="P/E Ratio (TTM)" value={stockDetail.peRatio ? stockDetail.peRatio.toFixed(2) : '--'} />
+  1110→                  <MetricRow label="EPS (TTM)" value={stockDetail.eps ? formatPrice(stockDetail.eps) : '--'} />
+  1111→                  <MetricRow label="P/B Ratio" value={stockDetail.pbRatio ? stockDetail.pbRatio.toFixed(2) : '--'} />
+  1112→                  <MetricRow label="Div Yield" value={stockDetail.dividendYield ? `${(stockDetail.dividendYield * 100).toFixed(2)}%` : '--'} highlight={stockDetail.dividendYield > 0 ? 'green' : undefined} />
+  1113→                  <MetricRow label="Industry P/E" value={stockDetail.industryPE ? stockDetail.industryPE.toFixed(2) : '--'} />
+  1114→                  <MetricRow label="Book Value" value={stockDetail.bookValue ? formatPrice(stockDetail.bookValue) : '--'} />
+  1115→                  <MetricRow label="Debt to Equity" value={stockDetail.debtToEquity ? stockDetail.debtToEquity.toFixed(2) : '--'} highlight={stockDetail.debtToEquity > 1 ? 'red' : stockDetail.debtToEquity > 0 ? 'green' : undefined} />
+  1116→                  <MetricRow label="Face Value" value={stockDetail.faceValue ? formatINRWhole(stockDetail.faceValue) : '--'} />
+  1117→                </div>
+  1118→                <p className="text-xs text-muted-foreground mt-3 flex items-center gap-1">
+  1119→                  <Info className="size-3" />
+  1120→                  Understand Fundamentals
+  1121→                </p>
+  1122→              </CollapsibleSection>
+  1123→
+  1124→              {/* ─── About Section ─────────────────────────────────────── */}
+  1125→              <CollapsibleSection title={`About ${stockDetail.name}`}>
+  1126→                <div className="grid grid-cols-2 gap-x-6 gap-y-2">
+  1127→                  <div className="flex items-center justify-between py-2 border-b border-border">
+  1128→                    <span className="text-sm text-muted-foreground">Sector</span>
+  1129→                    <span className="text-sm font-semibold text-foreground">{stockDetail.sector || '--'}</span>
+  1130→                  </div>
+  1131→                  <div className="flex items-center justify-between py-2 border-b border-border">
+  1132→                    <span className="text-sm text-muted-foreground">Industry</span>
+  1133→                    <span className="text-sm font-semibold text-foreground">{stockDetail.industry || '--'}</span>
+  1134→                  </div>
+  1135→                  <div className="flex items-center justify-between py-2 border-b border-border">
+  1136→                    <span className="text-sm text-muted-foreground">Exchange</span>
+  1137→                    <span className="text-sm font-semibold text-foreground">{stockDetail.exchange}</span>
+  1138→                  </div>
+  1139→                  <div className="flex items-center justify-between py-2 border-b border-border">
+  1140→                    <span className="text-sm text-muted-foreground">ISIN</span>
+  1141→                    <span className="text-sm font-mono font-tabular font-semibold text-foreground">{stockDetail.isin || '--'}</span>
+  1142→                  </div>
+  1143→                  <div className="flex items-center justify-between py-2 border-b border-border">
+  1144→                    <span className="text-sm text-muted-foreground">Lot Size</span>
+  1145→                    <span className="text-sm font-semibold text-foreground">{stockDetail.lotSize}</span>
+  1146→                  </div>
+  1147→                  <div className="flex items-center justify-between py-2 border-b border-border">
+  1148→                    <span className="text-sm text-muted-foreground">F&O Available</span>
+  1149→                    <span className={`text-sm font-semibold ${stockDetail.isFuturesAvailable || stockDetail.isOptionsAvailable ? 'text-[#00B386]' : 'text-foreground'}`}>
+  1150→                      {stockDetail.isFuturesAvailable || stockDetail.isOptionsAvailable ? 'Yes' : 'No'}
+  1151→                    </span>
+  1152→                  </div>
+  1153→                  {stockDetail.strikeInterval && (
+  1154→                    <div className="flex items-center justify-between py-2 border-b border-border">
+  1155→                      <span className="text-sm text-muted-foreground">Strike Interval</span>
+  1156→                      <span className="text-sm font-semibold text-foreground">₹{stockDetail.strikeInterval}</span>
+  1157→                    </div>
+  1158→                  )}
+  1159→                </div>
+  1160→              </CollapsibleSection>
+  1161→
+  1162→              {/* ─── Similar Stocks (Horizontal Scroll) ────────────────── */}
+  1163→              {similarStocks.length > 0 && (
+  1164→                <div>
+  1165→                  <div className="flex items-center justify-between mb-3">
+  1166→                    <h3 className="text-base font-semibold text-foreground">Similar Stocks</h3>
+  1167→                    <span className="text-xs text-muted-foreground flex items-center gap-1">
+  1168→                      <BarChart3 className="size-3" />
+  1169→                      Market Price
+  1170→                    </span>
+  1171→                  </div>
+  1172→                  <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1 scrollbar-thin">
+  1173→                    {similarStocks.map((stock) => {
+  1174→                      const stockPositive = stock.changePercent >= 0
+  1175→                      return (
+  1176→                        <button
+  1177→                          key={stock.symbol}
+  1178→                          onClick={() => navigateToStock(stock.symbol)}
+  1179→                          className="flex-shrink-0 w-[160px] bg-card border border-border rounded-xl p-3 hover:border-[#00d09c]/40 hover:shadow-sm transition-all text-left"
+  1180→                        >
+  1181→                          <p className="text-sm font-semibold text-foreground truncate">{stock.name}</p>
+  1182→                          <p className="text-xs text-muted-foreground">{stock.symbol}</p>
+  1183→                          <div className="mt-2 flex items-center justify-between">
+  1184→                            <span className="text-sm font-bold font-mono font-tabular text-foreground">
+  1185→                              {formatPrice(stock.currentPrice)}
+  1186→                            </span>
+  1187→                            <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-bold ${
+  1188→                              stockPositive ? 'bg-[#00B386]/10 text-[#00B386]' : 'bg-[#EB5B3C]/10 text-[#EB5B3C]'
+  1189→                            }`}>
+  1190→                              {formatPercent(stock.changePercent)}
+  1191→                            </span>
+  1192→                          </div>
+  1193→                        </button>
+  1194→                      )
+  1195→                    })}
+  1196→                  </div>
+  1197→                </div>
+  1198→              )}
+  1199→
+  1200→              {/* ─── Bottom Buy/Sell Bar (Mobile) ────────────────────────── */}
+  1201→              <div className="lg:hidden sticky bottom-16 z-20 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 py-3 bg-card border-t border-border">
+  1202→                <div className="flex gap-2">
+  1203→                  <Button
+  1204→                    className="flex-1 h-12 bg-[#00D09C] hover:bg-[#00b88a] text-white font-bold rounded-xl text-base gap-2"
+  1205→                    onClick={() => { setOrderSide('buy'); setTradeSegment('EQUITY'); setShowTradePanel(true) }}
+  1206→                  >
+  1207→                    <ShoppingCart className="size-5" />
+  1208→                    Buy {stockDetail.symbol}
+  1209→                  </Button>
+  1210→                  <Button
+  1211→                    className="flex-1 h-12 bg-[#EB5B3C] hover:bg-[#d44f33] text-white font-bold rounded-xl text-base gap-2"
+  1212→                    onClick={() => { setOrderSide('sell'); setTradeSegment('EQUITY'); setShowTradePanel(true) }}
+  1213→                  >
+  1214→                    Sell {stockDetail.symbol}
+  1215→                  </Button>
+  1216→                </div>
+  1217→              </div>
+  1218→            </motion.div>
+  1219→          )}
+  1220→
+  1221→          {/* ═══════════════════════════════════════════════════════════════
+  1222→              F&O TAB
+  1223→          ═══════════════════════════════════════════════════════════════ */}
+  1224→          {overviewTab === 'fno' && (
+  1225→            <motion.div
+  1226→              initial={{ opacity: 0, y: 10 }}
+  1227→              animate={{ opacity: 1, y: 0 }}
+  1228→              transition={{ duration: 0.3 }}
+  1229→              className="space-y-6"
+  1230→            >
+  1231→              {/* Data Source Banner */}
+  1232→              {fnoData && !fnoData.isRealData && (
+  1233→                <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
+  1234→                  <Zap className="size-5 text-amber-500 flex-shrink-0 mt-0.5" />
+  1235→                  <div>
+  1236→                    <p className="text-sm font-semibold text-amber-800">Connect Upstox or Dhan API for live F&O data</p>
+  1237→                    <p className="text-xs text-amber-600 mt-0.5">
+  1238→                      Current F&O data is from database/mock source. Connect your Upstox or Dhan API key for real-time data.
+  1239→                    </p>
+  1240→                  </div>
+  1241→                  {fnoData && getDataSourceBadge(fnoData.dataSource)}
+  1242→                </div>
+  1243→              )}
+  1244→              {fnoData && fnoData.isRealData && (
+  1245→                <div className="bg-[#00B386]/5 border border-[#00B386]/20 rounded-xl p-4 flex items-start gap-3">
+  1246→                  <Zap className="size-5 text-[#00B386] flex-shrink-0 mt-0.5" />
+  1247→                  <div>
+  1248→                    <p className="text-sm font-semibold text-[#00B386]">Live F&O Data Active</p>
+  1249→                    <p className="text-xs text-[#00B386]/70 mt-0.5">
+  1250→                      Real-time option chain data from {fnoData.dataSource === 'upstox' ? 'Upstox' : 'Dhan'} API.
+  1251→                    </p>
+  1252→                  </div>
+  1253→                  {getDataSourceBadge(fnoData.dataSource)}
+  1254→                </div>
+  1255→              )}
+  1256→
+  1257→              {/* ─── F&O Summary Card ────────────────────────────────── */}
+  1258→              <Card className="bg-card border border-border rounded-xl shadow-sm">
+  1259→                <CardContent className="p-5">
+  1260→                  <div className="flex items-center justify-between mb-4">
+  1261→                    <h3 className="text-base font-semibold text-foreground flex items-center gap-2">
+  1262→                      <Layers className="size-4 text-[#00D09C]" />
+  1263→                      F&O Summary
+  1264→                    </h3>
+  1265→                    <button
+  1266→                      onClick={fetchFnoData}
+  1267→                      className="size-8 flex items-center justify-center rounded-lg hover:bg-background text-muted-foreground hover:text-foreground transition-colors"
+  1268→                    >
+  1269→                      <RefreshCw className={`size-4 ${fnoLoading ? 'animate-spin' : ''}`} />
+  1270→                    </button>
+  1271→                  </div>
+  1272→
+  1273→                  {fnoLoading && !fnoData ? (
+  1274→                    <div className="flex items-center justify-center py-10">
+  1275→                      <Loader2 className="size-6 animate-spin text-[#00D09C]" />
+  1276→                    </div>
+  1277→                  ) : fnoData ? (
+  1278→                    <>
+  1279→                      {/* Summary Grid */}
+  1280→                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+  1281→                        {/* PCR */}
+  1282→                        <div className="bg-card rounded-xl p-4 text-center">
+  1283→                          <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">PCR</p>
+  1284→                          <p className={`text-2xl font-bold font-mono font-tabular ${
+  1285→                            fnoData.optionChainSummary.pcr > 1 ? 'text-[#00B386]' :
+  1286→                            fnoData.optionChainSummary.pcr < 0.7 ? 'text-[#EB5B3C]' :
+  1287→                            'text-foreground'
+  1288→                          }`}>
+  1289→                            {fnoData.optionChainSummary.pcr > 0 ? fnoData.optionChainSummary.pcr.toFixed(2) : '--'}
+  1290→                          </p>
+  1291→                          <p className="text-[10px] text-muted-foreground mt-0.5">
+  1292→                            {fnoData.optionChainSummary.pcr > 1 ? 'Bullish' :
+  1293→                             fnoData.optionChainSummary.pcr < 0.7 ? 'Bearish' : 'Neutral'}
+  1294→                          </p>
+  1295→                        </div>
+  1296→
+  1297→                        {/* Max Pain */}
+  1298→                        <div className="bg-card rounded-xl p-4 text-center">
+  1299→                          <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Max Pain</p>
+  1300→                          <p className="text-2xl font-bold font-mono font-tabular text-foreground">
+  1301→                            {fnoData.optionChainSummary.maxPain > 0 ? formatINRWhole(fnoData.optionChainSummary.maxPain) : '--'}
+  1302→                          </p>
+  1303→                          <div className="flex items-center justify-center gap-1 mt-0.5">
+  1304→                            <Target className="size-3 text-muted-foreground" />
+  1305→                            <p className="text-[10px] text-muted-foreground">
+  1306→                              {stockDetail.currentPrice > 0 && fnoData.optionChainSummary.maxPain > 0
+  1307→                                ? `${Math.abs(((stockDetail.currentPrice - fnoData.optionChainSummary.maxPain) / fnoData.optionChainSummary.maxPain) * 100).toFixed(1)}% ${stockDetail.currentPrice > fnoData.optionChainSummary.maxPain ? 'above' : 'below'}`
+  1308→                                : 'Strike level'
+  1309→                              }
+  1310→                            </p>
+  1311→                          </div>
+  1312→                        </div>
+  1313→
+  1314→                        {/* IV Percentile */}
+  1315→                        <div className="bg-card rounded-xl p-4 text-center">
+  1316→                          <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">IV Percentile</p>
+  1317→                          <p className="text-2xl font-bold font-mono font-tabular text-foreground">
+  1318→                            {fnoData.optionChainSummary.ivPercentile > 0 ? `${fnoData.optionChainSummary.ivPercentile.toFixed(0)}%` : '--'}
+  1319→                          </p>
+  1320→                          <div className="flex items-center justify-center gap-1 mt-0.5">
+  1321→                            <Gauge className="size-3 text-muted-foreground" />
+  1322→                            <p className="text-[10px] text-muted-foreground">
+  1323→                              {fnoData.optionChainSummary.ivPercentile > 70 ? 'High Vol' :
+  1324→                               fnoData.optionChainSummary.ivPercentile > 30 ? 'Normal' :
+  1325→                               fnoData.optionChainSummary.ivPercentile > 0 ? 'Low Vol' : 'Implied Vol'}
+  1326→                            </p>
+  1327→                          </div>
+  1328→                        </div>
+  1329→
+  1330→                        {/* Nearest Expiry */}
+  1331→                        <div className="bg-card rounded-xl p-4 text-center">
+  1332→                          <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Nearest Expiry</p>
+  1333→                          <p className="text-lg font-bold font-mono font-tabular text-foreground">
+  1334→                            {fnoData.optionChainSummary.nearestExpiry
+  1335→                              ? formatExpiry(fnoData.optionChainSummary.nearestExpiry)
+  1336→                              : '--'}
+  1337→                          </p>
+  1338→                          {fnoData.optionChainSummary.availableExpiries.length > 1 && (
+  1339→                            <select
+  1340→                              value={selectedExpiry}
+  1341→                              onChange={(e) => setSelectedExpiry(e.target.value)}
+  1342→                              className="mt-1 text-[10px] bg-card border border-border rounded-md px-2 py-0.5 text-muted-foreground font-medium"
+  1343→                            >
+  1344→                              {fnoData.optionChainSummary.availableExpiries.map((exp) => (
+  1345→                                <option key={exp} value={exp}>{formatExpiry(exp)}</option>
+  1346→                              ))}
+  1347→                            </select>
+  1348→                          )}
+  1349→                        </div>
+  1350→                      </div>
+  1351→
+  1352→                      {/* OI Summary Bar */}
+  1353→                      <div className="mt-4 flex items-center gap-3 text-xs">
+  1354→                        <div className="flex items-center gap-1.5">
+  1355→                          <div className="size-2.5 rounded-sm bg-[#00d09c]" />
+  1356→                          <span className="text-muted-foreground">Total Call OI:</span>
+  1357→                          <span className="font-mono font-tabular font-semibold text-foreground">
+  1358→                            {fnoData.optionChainSummary.totalCallOI > 0 ? formatVolume(fnoData.optionChainSummary.totalCallOI) : '--'}
+  1359→                          </span>
+  1360→                        </div>
+  1361→                        <div className="h-3 w-px bg-border" />
+  1362→                        <div className="flex items-center gap-1.5">
+  1363→                          <div className="size-2.5 rounded-sm bg-[#eb5b3c]" />
+  1364→                          <span className="text-muted-foreground">Total Put OI:</span>
+  1365→                          <span className="font-mono font-tabular font-semibold text-foreground">
+  1366→                            {fnoData.optionChainSummary.totalPutOI > 0 ? formatVolume(fnoData.optionChainSummary.totalPutOI) : '--'}
+  1367→                          </span>
+  1368→                        </div>
+  1369→                      </div>
+  1370→                    </>
+  1371→                  ) : (
+  1372→                    <div className="text-center py-10 text-muted-foreground text-sm">
+  1373→                      No F&O data available
+  1374→                    </div>
+  1375→                  )}
+  1376→                </CardContent>
+  1377→              </Card>
+  1378→
+  1379→              {/* ─── Futures Contracts Card ──────────────────────────── */}
+  1380→              <Card className="bg-card border border-border rounded-xl shadow-sm">
+  1381→                <CardContent className="p-5">
+  1382→                  <h3 className="text-base font-semibold text-foreground mb-4 flex items-center gap-2">
+  1383→                    <BarChart3 className="size-4 text-[#00D09C]" />
+  1384→                    Futures Contracts
+  1385→                  </h3>
+  1386→
+  1387→                  {fnoData?.futures && fnoData.futures.length > 0 ? (
+  1388→                    <div className="overflow-x-auto -mx-5 px-5">
+  1389→                      <table className="w-full text-xs">
+  1390→                        <thead>
+  1391→                          <tr className="border-b border-border">
+  1392→                            <th className="px-2 py-2.5 text-left font-semibold text-muted-foreground uppercase tracking-wider text-[10px]">Expiry</th>
+  1393→                            <th className="px-2 py-2.5 text-right font-semibold text-muted-foreground uppercase tracking-wider text-[10px]">LTP</th>
+  1394→                            <th className="px-2 py-2.5 text-right font-semibold text-muted-foreground uppercase tracking-wider text-[10px]">Change</th>
+  1395→                            <th className="px-2 py-2.5 text-right font-semibold text-muted-foreground uppercase tracking-wider text-[10px]">OI</th>
+  1396→                            <th className="px-2 py-2.5 text-right font-semibold text-muted-foreground uppercase tracking-wider text-[10px]">Volume</th>
+  1397→                            <th className="px-2 py-2.5 text-right font-semibold text-muted-foreground uppercase tracking-wider text-[10px]">Basis</th>
+  1398→                          </tr>
+  1399→                        </thead>
+  1400→                        <tbody>
+  1401→                          {fnoData.futures.map((fut, idx) => {
+  1402→                            const isUp = fut.change >= 0
+  1403→                            return (
+  1404→                              <tr key={idx} className="border-b border-border last:border-b-0 hover:bg-card transition-colors">
+  1405→                                <td className="px-2 py-3 text-left">
+  1406→                                  <span className="font-medium text-foreground">{formatExpiry(fut.expiryDate)}</span>
+  1407→                                  <span className="text-[10px] text-muted-foreground ml-1.5">({fut.lotSize} lot)</span>
+  1408→                                </td>
+  1409→                                <td className="px-2 py-3 text-right font-mono font-tabular font-semibold text-foreground">
+  1410→                                  {formatPrice(fut.ltp)}
+  1411→                                </td>
+  1412→                                <td className={`px-2 py-3 text-right font-mono font-tabular font-semibold ${isUp ? 'text-[#00B386]' : 'text-[#EB5B3C]'}`}>
+  1413→                                  {fut.change >= 0 ? '+' : ''}{formatPrice(fut.change)}
+  1414→                                  <span className="ml-1 text-[10px]">({formatPercent(fut.changePercent)})</span>
+  1415→                                </td>
+  1416→                                <td className="px-2 py-3 text-right font-mono font-tabular text-muted-foreground">
+  1417→                                  {fut.oi > 0 ? formatVolume(fut.oi) : '--'}
+  1418→                                </td>
+  1419→                                <td className="px-2 py-3 text-right font-mono font-tabular text-muted-foreground">
+  1420→                                  {fut.volume > 0 ? formatVolume(fut.volume) : '--'}
+  1421→                                </td>
+  1422→                                <td className="px-2 py-3 text-right font-mono">
+  1423→                                  <span className={fut.basis >= 0 ? 'text-[#00B386]' : 'text-[#EB5B3C]'}>
+  1424→                                    {formatPrice(fut.basis)}
+  1425→                                  </span>
+  1426→                                  <span className="text-[10px] text-muted-foreground ml-1">({formatPercent(fut.basisPercent)})</span>
+  1427→                                </td>
+  1428→                              </tr>
+  1429→                            )
+  1430→                          })}
+  1431→                        </tbody>
+  1432→                      </table>
+  1433→                    </div>
+  1434→                  ) : (
+  1435→                    <div className="text-center py-8 text-muted-foreground text-sm">
+  1436→                      No futures contracts available
+  1437→                    </div>
+  1438→                  )}
+  1439→                </CardContent>
+  1440→              </Card>
+  1441→
+  1442→              {/* ─── Option Chain Quick View ──────────────────────────── */}
+  1443→              <Card className="bg-card border border-border rounded-xl shadow-sm">
+  1444→                <CardContent className="p-5">
+  1445→                  <div className="flex items-center justify-between mb-4">
+  1446→                    <h3 className="text-base font-semibold text-foreground flex items-center gap-2">
+  1447→                      <Eye className="size-4 text-[#00D09C]" />
+  1448→                      Option Chain Quick View
+  1449→                    </h3>
+  1450→                    <span className="text-xs text-muted-foreground">
+  1451→                      ATM: {formatINRWhole(atmStrike)}
+  1452→                    </span>
+  1453→                  </div>
+  1454→
+  1455→                  {fnoLoading && !fnoData ? (
+  1456→                    <div className="flex items-center justify-center py-10">
+  1457→                      <Loader2 className="size-6 animate-spin text-[#00D09C]" />
+  1458→                    </div>
+  1459→                  ) : filteredOptionChain.length > 0 ? (
+  1460→                    <div className="overflow-x-auto -mx-5 px-5" ref={optionChainRef}>
+  1461→                      <table className="w-full text-xs">
+  1462→                        <thead>
+  1463→                          <tr className="border-b border-border">
+  1464→                            <th colSpan={3} className="px-2 py-2.5 text-center font-semibold text-[#00B386] uppercase tracking-wider text-[10px]">CALLS</th>
+  1465→                            <th className="px-2 py-2.5 text-center font-bold text-foreground bg-background border-x border-border uppercase tracking-wider text-[10px]">Strike</th>
+  1466→                            <th colSpan={3} className="px-2 py-2.5 text-center font-semibold text-[#EB5B3C] uppercase tracking-wider text-[10px]">PUTS</th>
+  1467→                          </tr>
+  1468→                          <tr className="border-b border-border text-muted-foreground">
+  1469→                            <th className="px-2 py-2 text-right font-medium text-[10px]">OI</th>
+  1470→                            <th className="px-2 py-2 text-right font-medium text-[10px]">Chg</th>
+  1471→                            <th className="px-2 py-2 text-right font-medium text-[10px]">LTP</th>
+  1472→                            <th className="px-2 py-2 text-center font-bold bg-background border-x border-border text-[10px]">₹</th>
+  1473→                            <th className="px-2 py-2 text-left font-medium text-[10px]">LTP</th>
+  1474→                            <th className="px-2 py-2 text-left font-medium text-[10px]">Chg</th>
+  1475→                            <th className="px-2 py-2 text-left font-medium text-[10px]">OI</th>
+  1476→                          </tr>
+  1477→                        </thead>
+  1478→                        <tbody>
+  1479→                          {filteredOptionChain.map((opt) => {
+  1480→                            const isAtm = opt.strikePrice === atmStrike
+  1481→                            const ceItm = opt.strikePrice < stockDetail.currentPrice
+  1482→                            const peItm = opt.strikePrice > stockDetail.currentPrice
+  1483→
+  1484→                            return (
+  1485→                              <tr
+  1486→                                key={opt.strikePrice}
+  1487→                                className={`border-b border-border last:border-b-0 ${
+  1488→                                  isAtm ? 'bg-[#00B386]/8' : 'hover:bg-card'
+  1489→                                }`}
+  1490→                              >
+  1491→                                {/* CE Side */}
+  1492→                                <td className={`px-2 py-2 text-right font-mono font-tabular text-muted-foreground ${ceItm ? 'bg-[#00B386]/5' : ''}`}>
+  1493→                                  {opt.ceOI > 0 ? formatVolume(opt.ceOI) : '-'}
+  1494→                                </td>
+  1495→                                <td className={`px-2 py-2 text-right font-mono font-tabular ${opt.ceChange >= 0 ? 'text-[#00B386]' : 'text-[#EB5B3C]'} ${ceItm ? 'bg-[#00B386]/5' : ''}`}>
+  1496→                                  {opt.ceChange !== 0 ? `${opt.ceChange >= 0 ? '+' : ''}${formatPrice(opt.ceChange)}` : '-'}
+  1497→                                </td>
+  1498→                                <td className={`px-2 py-2 text-right font-mono font-tabular font-semibold text-foreground ${ceItm ? 'bg-[#00B386]/5' : ''}`}>
+  1499→                                  {opt.ceLtp > 0 ? formatPrice(opt.ceLtp) : '-'}
+  1500→                                </td>
+  1501→
+  1502→                                {/* Strike */}
+  1503→                                <td className={`px-2 py-2 text-center font-mono font-tabular font-bold bg-background border-x border-border ${
+  1504→                                  isAtm ? 'bg-[#00B386]/15 text-[#00B386]' : 'text-foreground'
+  1505→                                }`}>
+  1506→                                  {formatINRWhole(opt.strikePrice)}
+  1507→                                </td>
+  1508→
+  1509→                                {/* PE Side */}
+  1510→                                <td className={`px-2 py-2 text-left font-mono font-tabular font-semibold text-foreground ${peItm ? 'bg-[#EB5B3C]/5' : ''}`}>
+  1511→                                  {opt.peLtp > 0 ? formatPrice(opt.peLtp) : '-'}
+  1512→                                </td>
+  1513→                                <td className={`px-2 py-2 text-left font-mono font-tabular ${opt.peChange >= 0 ? 'text-[#00B386]' : 'text-[#EB5B3C]'} ${peItm ? 'bg-[#EB5B3C]/5' : ''}`}>
+  1514→                                  {opt.peChange !== 0 ? `${opt.peChange >= 0 ? '+' : ''}${formatPrice(opt.peChange)}` : '-'}
+  1515→                                </td>
+  1516→                                <td className={`px-2 py-2 text-left font-mono font-tabular text-muted-foreground ${peItm ? 'bg-[#EB5B3C]/5' : ''}`}>
+  1517→                                  {opt.peOI > 0 ? formatVolume(opt.peOI) : '-'}
+  1518→                                </td>
+  1519→                              </tr>
+  1520→                            )
+  1521→                          })}
+  1522→                        </tbody>
+  1523→                      </table>
+  1524→                    </div>
+  1525→                  ) : (
+  1526→                    <div className="text-center py-8 text-muted-foreground text-sm">
+  1527→                      No option chain data available
+  1528→                    </div>
+  1529→                  )}
+  1530→
+  1531→                  </CardContent>
+  1532→              </Card>
+  1533→
+  1534→              {/* ─── F&O Quick Trade Button ──────────────────────────── */}
+  1535→              <div className="flex gap-3">
+  1536→                <Button
+  1537→                  className="flex-1 h-12 bg-[#00D09C] hover:bg-[#00b88a] text-white font-bold rounded-xl text-base gap-2"
+  1538→                  onClick={() => {
+  1539→                    setOrderSide('buy')
+  1540→                    setTradeSegment(stockDetail.isFuturesAvailable ? 'FUTURES' : 'OPTIONS')
+  1541→                    setShowTradePanel(true)
+  1542→                  }}
+  1543→                >
+  1544→                  <ShoppingCart className="size-5" />
+  1545→                  Buy F&O
+  1546→                </Button>
+  1547→                <Button
+  1548→                  className="flex-1 h-12 bg-[#eb5b3c] hover:bg-[#d44f33] text-white font-bold rounded-xl text-base gap-2"
+  1549→                  onClick={() => {
+  1550→                    setOrderSide('sell')
+  1551→                    setTradeSegment(stockDetail.isFuturesAvailable ? 'FUTURES' : 'OPTIONS')
+  1552→                    setShowTradePanel(true)
+  1553→                  }}
+  1554→                >
+  1555→                  Sell F&O
+  1556→                </Button>
+  1557→              </div>
+  1558→            </motion.div>
+  1559→          )}
+  1560→
+  1561→          {/* ═══════════════════════════════════════════════════════════════
+  1562→              TECHNICALS TAB
+  1563→          ═══════════════════════════════════════════════════════════════ */}
+  1564→          {overviewTab === 'technicals' && (
+  1565→            <motion.div
+  1566→              initial={{ opacity: 0, y: 10 }}
+  1567→              animate={{ opacity: 1, y: 0 }}
+  1568→              transition={{ duration: 0.3 }}
+  1569→              className="space-y-6"
+  1570→            >
+  1571→              {/* Technical Indicators */}
+  1572→              <Card className="bg-card border border-border rounded-xl shadow-sm">
+  1573→                <CardContent className="p-5">
+  1574→                  <h3 className="text-base font-semibold text-foreground mb-4 flex items-center gap-2">
+  1575→                    <Activity className="size-4 text-[#00D09C]" />
+  1576→                    Technical Indicators
+  1577→                  </h3>
+  1578→                  <div className="grid grid-cols-2 gap-x-6">
+  1579→                    <MetricRow label="RSI (14)" value="--" />
+  1580→                    <MetricRow label="MACD" value="--" />
+  1581→                    <MetricRow label="SMA 20" value="--" />
+  1582→                    <MetricRow label="SMA 50" value="--" />
+  1583→                    <MetricRow label="EMA 20" value="--" />
+  1584→                    <MetricRow label="EMA 50" value="--" />
+  1585→                    <MetricRow label="Bollinger Upper" value="--" />
+  1586→                    <MetricRow label="Bollinger Lower" value="--" />
+  1587→                  </div>
+  1588→                  <p className="text-xs text-muted-foreground mt-4 flex items-center gap-1">
+  1589→                    <Info className="size-3" />
+  1590→                    Technical indicators will be available with real market data integration
+  1591→                  </p>
+  1592→                </CardContent>
+  1593→              </Card>
+  1594→
+  1595→              {/* Support & Resistance */}
+  1596→              <Card className="bg-card border border-border rounded-xl shadow-sm">
+  1597→                <CardContent className="p-5">
+  1598→                  <h3 className="text-base font-semibold text-foreground mb-4 flex items-center gap-2">
+  1599→                    <Target className="size-4 text-[#00D09C]" />
+  1600→                    Support & Resistance
+  1601→                  </h3>
+  1602→                  <div className="space-y-3">
+  1603→                    <div className="flex items-center justify-between">
+  1604→                      <span className="text-sm text-muted-foreground">Resistance 3</span>
+  1605→                      <span className="text-sm font-mono font-tabular font-semibold text-[#EB5B3C]">--</span>
+  1606→                    </div>
+  1607→                    <div className="flex items-center justify-between">
+  1608→                      <span className="text-sm text-muted-foreground">Resistance 2</span>
+  1609→                      <span className="text-sm font-mono font-tabular font-semibold text-[#EB5B3C]">--</span>
+  1610→                    </div>
+  1611→                    <div className="flex items-center justify-between">
+  1612→                      <span className="text-sm text-muted-foreground">Resistance 1</span>
+  1613→                      <span className="text-sm font-mono font-tabular font-semibold text-[#EB5B3C]">--</span>
+  1614→                    </div>
+  1615→                    <div className="h-px bg-border" />
+  1616→                    <div className="flex items-center justify-between">
+  1617→                      <span className="text-sm font-medium text-foreground">Current Price</span>
+  1618→                      <span className={`text-sm font-mono font-tabular font-bold ${isPositive ? 'text-[#00B386]' : 'text-[#EB5B3C]'}`}>
+  1619→                        {formatPrice(stockDetail.currentPrice)}
+  1620→                      </span>
+  1621→                    </div>
+  1622→                    <div className="h-px bg-border" />
+  1623→                    <div className="flex items-center justify-between">
+  1624→                      <span className="text-sm text-muted-foreground">Support 1</span>
+  1625→                      <span className="text-sm font-mono font-tabular font-semibold text-[#00B386]">--</span>
+  1626→                    </div>
+  1627→                    <div className="flex items-center justify-between">
+  1628→                      <span className="text-sm text-muted-foreground">Support 2</span>
+  1629→                      <span className="text-sm font-mono font-tabular font-semibold text-[#00B386]">--</span>
+  1630→                    </div>
+  1631→                    <div className="flex items-center justify-between">
+  1632→                      <span className="text-sm text-muted-foreground">Support 3</span>
+  1633→                      <span className="text-sm font-mono font-tabular font-semibold text-[#00B386]">--</span>
+  1634→                    </div>
+  1635→                  </div>
+  1636→                </CardContent>
+  1637→              </Card>
+  1638→
+  1639→              {/* Signal Summary */}
+  1640→              <Card className="bg-card border border-border rounded-xl shadow-sm">
+  1641→                <CardContent className="p-5">
+  1642→                  <h3 className="text-base font-semibold text-foreground mb-4 flex items-center gap-2">
+  1643→                    <Gauge className="size-4 text-[#00D09C]" />
+  1644→                    Signal Summary
+  1645→                  </h3>
+  1646→                  <div className="flex items-center justify-center py-6">
+  1647→                    <div className="text-center">
+  1648→                      <div className="size-20 rounded-full border-4 border-[#6b7280]/20 flex items-center justify-center mx-auto mb-3">
+  1649→                        <span className="text-lg font-bold text-muted-foreground">Neutral</span>
+  1650→                      </div>
+  1651→                      <p className="text-sm text-muted-foreground">
+  1652→                        No clear signal available
+  1653→                      </p>
+  1654→                      <p className="text-xs text-muted-foreground/60 mt-1">
+  1655→                        Requires real-time data for accurate signals
+  1656→                      </p>
+  1657→                    </div>
+  1658→                  </div>
+  1659→                </CardContent>
+  1660→              </Card>
+  1661→            </motion.div>
+  1662→          )}
+  1663→
+  1664→          {/* ═══════════════════════════════════════════════════════════════
+  1665→              NEWS TAB
+  1666→          ═══════════════════════════════════════════════════════════════ */}
+  1667→          {overviewTab === 'news' && (
+  1668→            <motion.div
+  1669→              initial={{ opacity: 0, y: 10 }}
+  1670→              animate={{ opacity: 1, y: 0 }}
+  1671→              transition={{ duration: 0.3 }}
+  1672→            >
+  1673→              <Card className="bg-card border border-border rounded-xl shadow-sm">
+  1674→                <CardContent className="p-8 flex flex-col items-center justify-center text-center">
+  1675→                  <div className="size-14 rounded-full bg-background flex items-center justify-center mb-4">
+  1676→                    <TrendingUp className="size-7 text-muted-foreground/40" />
+  1677→                  </div>
+  1678→                  <p className="text-foreground font-semibold text-sm">No news available</p>
+  1679→                  <p className="text-muted-foreground text-xs mt-1">
+  1680→                    News feed for {stockDetail.name} will appear here
+  1681→                  </p>
+  1682→                </CardContent>
+  1683→              </Card>
+  1684→            </motion.div>
+  1685→          )}
+  1686→        </div>
+  1687→      </div>
+  1688→
+  1689→      {/* ═══ Trade Panel Overlay ═════════════════════════════════════════ */}
+  1690→      <AnimatePresence>
+  1691→        {showTradePanel && stockDetail && (
+  1692→          <>
+  1693→            {/* Backdrop */}
+  1694→            <motion.div
+  1695→              initial={{ opacity: 0 }}
+  1696→              animate={{ opacity: 1 }}
+  1697→              exit={{ opacity: 0 }}
+  1698→              className="fixed inset-0 z-50 bg-black/50"
+  1699→              onClick={() => setShowTradePanel(false)}
+  1700→            />
+  1701→
+  1702→            {/* Panel */}
+  1703→            <motion.div
+  1704→              initial={{ y: '100%' }}
+  1705→              animate={{ y: 0 }}
+  1706→              exit={{ y: '100%' }}
+  1707→              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+  1708→              className="fixed bottom-0 left-0 right-0 z-50 max-h-[85vh] overflow-y-auto bg-card rounded-t-2xl shadow-2xl"
+  1709→              onClick={(e) => e.stopPropagation()}
+  1710→            >
+  1711→              <div className="max-w-lg mx-auto">
+  1712→                {/* Drag Handle */}
+  1713→                <div className="flex justify-center pt-3 pb-2">
+  1714→                  <div className="w-10 h-1 rounded-full bg-border" />
+  1715→                </div>
+  1716→
+  1717→                <div className="px-6 pb-8 space-y-5">
+  1718→                  {/* Stock Info */}
+  1719→                  <div className="flex items-center justify-between">
+  1720→                    <div>
+  1721→                      <div className="flex items-center gap-2">
+  1722→                        <span className="font-bold text-lg text-[#00D09C]">{stockDetail.symbol}</span>
+  1723→                        <span className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-md text-[10px] font-bold ${
+  1724→                          isPositive ? 'bg-[#00B386]/10 text-[#00B386]' : 'bg-[#EB5B3C]/10 text-[#EB5B3C]'
+  1725→                        }`}>
+  1726→                          {formatPercent(stockDetail.changePercent)}
+  1727→                        </span>
+  1728→                        {tradeSegment !== 'EQUITY' && (
+  1729→                          <Badge className="text-[9px] font-bold bg-[#00B386]/10 text-[#00B386] border-[#00B386]/20 border px-1.5 py-0">
+  1730→                            {tradeSegment}
+  1731→                          </Badge>
+  1732→                        )}
+  1733→                      </div>
+  1734→                      <p className="text-xs text-muted-foreground mt-0.5 truncate max-w-[200px]">{stockDetail.name}</p>
+  1735→                    </div>
+  1736→                    <div className="text-right">
+  1737→                      <span className="text-2xl font-bold font-mono font-tabular text-foreground">
+  1738→                        {formatINR(stockDetail.currentPrice)}
+  1739→                      </span>
+  1740→                      <p className={`text-xs font-medium ${isPositive ? 'text-[#00B386]' : 'text-[#EB5B3C]'}`}>
+  1741→                        {isPositive ? '+' : ''}{formatINR(stockDetail.change)} today
+  1742→                      </p>
+  1743→                    </div>
+  1744→                  </div>
+  1745→
+  1746→                  {/* Segment Selector (if F&O available) */}
+  1747→                  {(stockDetail.isFuturesAvailable || stockDetail.isOptionsAvailable) && (
+  1748→                    <div className="flex rounded-xl bg-background p-1">
+  1749→                      {(['EQUITY', 'FUTURES', 'OPTIONS'] as const).map((seg) => (
+  1750→                        <button
+  1751→                          key={seg}
+  1752→                          className={`flex-1 h-9 rounded-lg text-xs font-bold transition-all ${
+  1753→                            tradeSegment === seg ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+  1754→                          }`}
+  1755→                          onClick={() => setTradeSegment(seg)}
+  1756→                        >
+  1757→                          {seg}
+  1758→                        </button>
+  1759→                      ))}
+  1760→                    </div>
+  1761→                  )}
+  1762→
+  1763→                  {/* Buy/Sell Toggle */}
+  1764→                  <div className="flex rounded-xl bg-background p-1">
+  1765→                    <button
+  1766→                      className={`flex-1 h-10 rounded-lg text-sm font-bold transition-all ${
+  1767→                        orderSide === 'buy' ? 'bg-[#00d09c] text-white shadow-sm' : 'text-muted-foreground hover:text-foreground'
+  1768→                      }`}
+  1769→                      onClick={() => setOrderSide('buy')}
+  1770→                    >
+  1771→                      Buy
+  1772→                    </button>
+  1773→                    <button
+  1774→                      className={`flex-1 h-10 rounded-lg text-sm font-bold transition-all ${
+  1775→                        orderSide === 'sell' ? 'bg-[#eb5b3c] text-white shadow-sm' : 'text-muted-foreground hover:text-foreground'
+  1776→                      }`}
+  1777→                      onClick={() => setOrderSide('sell')}
+  1778→                    >
+  1779→                      Sell
+  1780→                    </button>
+  1781→                  </div>
+  1782→
+  1783→                  {/* Order Type */}
+  1784→                  <div className="space-y-1.5">
+  1785→                    <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Order Type</label>
+  1786→                    <div className="flex gap-2">
+  1787→                      {['MARKET', 'LIMIT'].map((type) => (
+  1788→                        <button
+  1789→                          key={type}
+  1790→                          onClick={() => setOrderType(type)}
+  1791→                          className={`flex-1 py-2.5 rounded-lg text-xs font-semibold transition-all border ${
+  1792→                            orderType === type
+  1793→                              ? 'border-[#00d09c] bg-[#00B386]/5 text-[#00B386]'
+  1794→                              : 'border-border text-muted-foreground hover:border-muted-foreground'
+  1795→                          }`}
+  1796→                        >
+  1797→                          {type}
+  1798→                        </button>
+  1799→                      ))}
+  1800→                    </div>
+  1801→                  </div>
+  1802→
+  1803→                  {/* Product Type */}
+  1804→                  <div className="space-y-1.5">
+  1805→                    <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Product Type</label>
+  1806→                    <div className="flex gap-2">
+  1807→                      {['INTRADAY', 'DELIVERY'].map((type) => (
+  1808→                        <button
+  1809→                          key={type}
+  1810→                          onClick={() => setProductType(type)}
+  1811→                          className={`flex-1 py-2.5 rounded-lg text-xs font-semibold transition-all border ${
+  1812→                            productType === type
+  1813→                              ? 'border-[#00d09c] bg-[#00B386]/5 text-[#00B386]'
+  1814→                              : 'border-border text-muted-foreground hover:border-muted-foreground'
+  1815→                          }`}
+  1816→                        >
+  1817→                          {type}
+  1818→                        </button>
+  1819→                      ))}
+  1820→                    </div>
+  1821→                  </div>
+  1822→
+  1823→                  {/* Quantity */}
+  1824→                  <div className="space-y-1.5">
+  1825→                    <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+  1826→                      Quantity {tradeSegment !== 'EQUITY' ? `(Lot: ${stockDetail.lotSize})` : ''}
+  1827→                    </label>
+  1828→                    <div className="flex items-center gap-3">
+  1829→                      <button
+  1830→                        className="size-10 rounded-lg border border-border flex items-center justify-center text-muted-foreground hover:bg-background active:bg-accent transition-colors"
+  1831→                        onClick={() => setQuantity(Math.max(1, quantity - (tradeSegment !== 'EQUITY' ? stockDetail.lotSize : 1)))}
+  1832→                      >
+  1833→                        <Minus className="size-4" />
+  1834→                      </button>
+  1835→                      <Input
+  1836→                        type="number"
+  1837→                        value={quantity}
+  1838→                        onChange={(e) => setQuantity(Math.max(1, parseInt(e.target.value) || 1))}
+  1839→                        className="text-center font-mono font-tabular text-lg font-bold bg-card border-border h-10"
+  1840→                      />
+  1841→                      <button
+  1842→                        className="size-10 rounded-lg border border-border flex items-center justify-center text-muted-foreground hover:bg-background active:bg-accent transition-colors"
+  1843→                        onClick={() => setQuantity(quantity + (tradeSegment !== 'EQUITY' ? stockDetail.lotSize : 1))}
+  1844→                      >
+  1845→                        <Plus className="size-4" />
+  1846→                      </button>
+  1847→                    </div>
+  1848→                  </div>
+  1849→
+  1850→                  {/* Limit Price */}
+  1851→                  {orderType === 'LIMIT' && (
+  1852→                    <div className="space-y-1.5">
+  1853→                      <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Limit Price</label>
+  1854→                      <Input
+  1855→                        type="number"
+  1856→                        value={price}
+  1857→                        onChange={(e) => setPrice(e.target.value)}
+  1858→                        placeholder="Enter price"
+  1859→                        className="font-mono font-tabular text-lg font-bold bg-card border-border h-10"
+  1860→                      />
+  1861→                    </div>
+  1862→                  )}
+  1863→
+  1864→                  {/* Order Summary */}
+  1865→                  <div className="bg-card rounded-xl p-4 space-y-2.5">
+  1866→                    <div className="flex items-center justify-between">
+  1867→                      <span className="text-xs text-muted-foreground">Estimated Total</span>
+  1868→                      <span className="text-sm font-bold font-mono font-tabular text-foreground">{formatINR(estimatedTotal)}</span>
+  1869→                    </div>
+  1870→                    <div className="flex items-center justify-between">
+  1871→                      <span className="text-xs text-muted-foreground">Brokerage</span>
+  1872→                      <span className="text-sm font-mono font-tabular font-semibold text-muted-foreground">{formatINR(estimatedBrokerage)}</span>
+  1873→                    </div>
+  1874→                    <div className="h-px bg-border" />
+  1875→                    <div className="flex items-center justify-between">
+  1876→                      <span className="text-xs text-muted-foreground">Segment</span>
+  1877→                      <span className="text-xs font-semibold text-foreground">{tradeSegment}</span>
+  1878→                    </div>
+  1879→                    <div className="flex items-center justify-between">
+  1880→                      <span className="text-xs text-muted-foreground">Product</span>
+  1881→                      <span className="text-xs font-semibold text-foreground">{productType}</span>
+  1882→                    </div>
+  1883→                  </div>
+  1884→
+  1885→                  {/* Account Info */}
+  1886→                  <div className="bg-[#f0fdf4] rounded-xl p-4 space-y-2 border border-[#00d09c]/10">
+  1887→                    <div className="flex items-center justify-between">
+  1888→                      <span className="text-xs text-muted-foreground">Available Balance</span>
+  1889→                      <span className="text-sm font-bold font-mono font-tabular text-foreground">{formatINR(availableBalance)}</span>
+  1890→                    </div>
+  1891→                    <div className="flex items-center justify-between">
+  1892→                      <span className="text-xs text-muted-foreground">Buying Power</span>
+  1893→                      <span className="text-sm font-bold font-mono font-tabular text-[#00B386]">{formatINR(buyingPower)}</span>
+  1894→                    </div>
+  1895→                  </div>
+  1896→
+  1897→                  {/* Submit Button */}
+  1898→                  <Button
+  1899→                    className={`w-full h-12 font-bold rounded-xl text-base gap-2 ${
+  1900→                      orderSide === 'buy'
+  1901→                        ? 'bg-[#00D09C] hover:bg-[#00b88a] text-white'
+  1902→                        : 'bg-[#eb5b3c] hover:bg-[#d44f33] text-white'
+  1903→                    }`}
+  1904→                    onClick={handlePlaceOrder}
+  1905→                    disabled={placingOrder}
+  1906→                  >
+  1907→                    {placingOrder ? (
+  1908→                      <>
+  1909→                        <Loader2 className="size-5 animate-spin" />
+  1910→                        Placing Order...
+  1911→                      </>
+  1912→                    ) : (
+  1913→                      <>
+  1914→                        <ShoppingCart className="size-5" />
+  1915→                        {orderSide === 'buy' ? 'Buy' : 'Sell'} {quantity} {stockDetail.symbol}
+  1916→                      </>
+  1917→                    )}
+  1918→                  </Button>
+  1919→                </div>
+  1920→              </div>
+  1921→            </motion.div>
+  1922→          </>
+  1923→        )}
+  1924→      </AnimatePresence>
+  1925→
+  1926→      {/* ═══ Trade Confirmation Modal ═══════════════════════════════════ */}
+  1927→      <TradeConfirmModal
+  1928→        open={confirmModalOpen}
+  1929→        onClose={() => setConfirmModalOpen(false)}
+  1930→        tradeData={confirmData}
+  1931→        onConfirm={executeTrade}
+  1932→        onSuccess={handleTradeConfirmSuccess}
+  1933→      />
+  1934→    </div>
+  1935→  )
+  1936→}

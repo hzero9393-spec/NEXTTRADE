@@ -1,0 +1,828 @@
+     1→import { NextRequest, NextResponse } from 'next/server'
+     2→import { db } from '@/lib/db'
+     3→import { authenticateRequest } from '@/lib/trade-auth'
+     4→import { PDFDocument, rgb, StandardFonts } from 'pdf-lib'
+     5→
+     6→// ─── Color Constants ────────────────────────────────────────────────
+     7→const COLORS = {
+     8→  darkBg: rgb(0.11, 0.11, 0.14),          // #1C1C24
+     9→  headerBg: rgb(0.08, 0.08, 0.11),         // #141419
+    10→  white: rgb(1, 1, 1),
+    11→  lightGray: rgb(0.92, 0.92, 0.94),
+    12→  midGray: rgb(0.55, 0.55, 0.6),
+    13→  darkGray: rgb(0.3, 0.3, 0.35),
+    14→  green: rgb(0, 0.816, 0.612),             // #00D09C
+    15→  red: rgb(0.918, 0.357, 0.235),           // #eb5b3c
+    16→  tableHeaderBg: rgb(0.06, 0.06, 0.09),
+    17→  tableRowEven: rgb(0.96, 0.96, 0.97),
+    18→  tableRowOdd: rgb(1, 1, 1),
+    19→  accentLine: rgb(0, 0.816, 0.612),        // #00D09C
+    20→  sectionBg: rgb(0.96, 0.97, 0.98),
+    21→  warningBg: rgb(1, 0.95, 0.9),
+    22→  warningText: rgb(0.8, 0.35, 0.1),
+    23→}
+    24→
+    25→// ─── Helper: Format currency (using Rs. instead of ₹ for Helvetica compatibility) ────
+    26→function formatCurrency(value: number | null | undefined): string {
+    27→  if (value === null || value === undefined) return 'Rs.0.00'
+    28→  const sign = value >= 0 ? '' : '-'
+    29→  const abs = Math.abs(value)
+    30→  return `${sign}Rs.${abs.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    31→}
+    32→
+    33→// ─── Helper: Format percent ─────────────────────────────────────────
+    34→function formatPercent(value: number | null | undefined): string {
+    35→  if (value === null || value === undefined) return '0.00%'
+    36→  const sign = value >= 0 ? '+' : ''
+    37→  return `${sign}${value.toFixed(2)}%`
+    38→}
+    39→
+    40→// ─── Helper: Format date ────────────────────────────────────────────
+    41→function formatDate(date: Date): string {
+    42→  return date.toLocaleDateString('en-IN', {
+    43→    day: '2-digit',
+    44→    month: 'short',
+    45→    year: 'numeric',
+    46→  })
+    47→}
+    48→
+    49→function formatDateTime(date: Date): string {
+    50→  return date.toLocaleDateString('en-IN', {
+    51→    day: '2-digit',
+    52→    month: 'short',
+    53→    year: 'numeric',
+    54→    hour: '2-digit',
+    55→    minute: '2-digit',
+    56→    hour12: true,
+    57→  })
+    58→}
+    59→
+    60→// ─── Helper: Draw wrapped text ──────────────────────────────────────
+    61→function drawWrappedText(
+    62→  page: ReturnType<PDFDocument['addPage']>,
+    63→  text: string,
+    64→  font: ReturnType<PDFDocument['embedFont']>,
+    65→  x: number,
+    66→  y: number,
+    67→  maxWidth: number,
+    68→  fontSize: number,
+    69→  color: ReturnType<typeof rgb> = COLORS.darkBg,
+    70→): number {
+    71→  const words = text.split(' ')
+    72→  let line = ''
+    73→  let currentY = y
+    74→
+    75→  for (const word of words) {
+    76→    const testLine = line ? `${line} ${word}` : word
+    77→    const testWidth = font.widthOfTextAtSize(testLine, fontSize)
+    78→    if (testWidth > maxWidth && line) {
+    79→      page.drawText(line, { x, y: currentY, size: fontSize, font, color })
+    80→      currentY -= fontSize + 4
+    81→      line = word
+    82→    } else {
+    83→      line = testLine
+    84→    }
+    85→  }
+    86→  if (line) {
+    87→    page.drawText(line, { x, y: currentY, size: fontSize, font, color })
+    88→    currentY -= fontSize + 4
+    89→  }
+    90→
+    91→  return currentY
+    92→}
+    93→
+    94→// ─── Helper: Draw a section divider ─────────────────────────────────
+    95→function drawDivider(page: ReturnType<PDFDocument['addPage']>, y: number, width: number) {
+    96→  page.drawLine({
+    97→    start: { x: 50, y },
+    98→    end: { x: 50 + width, y },
+    99→    thickness: 0.5,
+   100→    color: COLORS.darkGray,
+   101→  })
+   102→}
+   103→
+   104→// ─── GET Handler (query param ?type=last|monthly|full) ──────────────
+   105→export async function GET(request: NextRequest) {
+   106→  try {
+   107→    const auth = await authenticateRequest(request)
+   108→    if (auth.error) return auth.error
+   109→    const userId = auth.userId
+   110→
+   111→    const { searchParams } = new URL(request.url)
+   112→    const reportType = searchParams.get('type')
+   113→
+   114→    if (!reportType || !['last', 'monthly', 'full'].includes(reportType)) {
+   115→      return NextResponse.json(
+   116→        { error: 'Invalid report type. Must be "last", "monthly", or "full".' },
+   117→        { status: 400 }
+   118→      )
+   119→    }
+   120→
+   121→    return await generateReport(userId, reportType)
+   122→  } catch (error) {
+   123→    const message = error instanceof Error ? error.message : 'Unknown error'
+   124→    console.error('[GET /api/profile/report] Error:', message, error)
+   125→    return NextResponse.json(
+   126→      { error: `Failed to generate report: ${message}` },
+   127→      { status: 500 }
+   128→    )
+   129→  }
+   130→}
+   131→
+   132→// ─── POST Handler (body { type: 'last'|'monthly'|'full' }) ──────────
+   133→export async function POST(request: NextRequest) {
+   134→  try {
+   135→    const auth = await authenticateRequest(request)
+   136→    if (auth.error) return auth.error
+   137→    const userId = auth.userId
+   138→
+   139→    let body: { type?: string }
+   140→    try {
+   141→      body = await request.json()
+   142→    } catch {
+   143→      return NextResponse.json(
+   144→        { error: 'Invalid request body' },
+   145→        { status: 400 }
+   146→      )
+   147→    }
+   148→
+   149→    const reportType = body.type
+   150→    if (!reportType || !['last', 'monthly', 'full'].includes(reportType)) {
+   151→      return NextResponse.json(
+   152→        { error: 'Invalid report type. Must be "last", "monthly", or "full".' },
+   153→        { status: 400 }
+   154→      )
+   155→    }
+   156→
+   157→    return await generateReport(userId, reportType)
+   158→  } catch (error) {
+   159→    const message = error instanceof Error ? error.message : 'Unknown error'
+   160→    console.error('[POST /api/profile/report] Error:', message, error)
+   161→    return NextResponse.json(
+   162→      { error: `Failed to generate report: ${message}` },
+   163→      { status: 500 }
+   164→    )
+   165→  }
+   166→}
+   167→
+   168→// ─── Shared Report Generation Logic ─────────────────────────────────
+   169→async function generateReport(userId: string, reportType: string): Promise<NextResponse> {
+   170→  // Fetch user data
+   171→  let user
+   172→  try {
+   173→    user = await db.user.findUnique({
+   174→      where: { id: userId },
+   175→      select: {
+   176→        id: true,
+   177→        name: true,
+   178→        email: true,
+   179→        virtualBalance: true,
+   180→        totalTrades: true,
+   181→        winRate: true,
+   182→        totalPnl: true,
+   183→        subscription: true,
+   184→        createdAt: true,
+   185→      },
+   186→    })
+   187→  } catch (dbError) {
+   188→    const message = dbError instanceof Error ? dbError.message : 'Unknown database error'
+   189→    console.error('[generateReport] Failed to fetch user:', message)
+   190→    return NextResponse.json(
+   191→      { error: `Failed to fetch user data: ${message}` },
+   192→      { status: 500 }
+   193→    )
+   194→  }
+   195→
+   196→  if (!user) {
+   197→    return NextResponse.json({ error: 'User not found' }, { status: 404 })
+   198→  }
+   199→
+   200→  // Fetch trades based on type
+   201→  const now = new Date()
+   202→  let tradesWhere: Record<string, unknown> = { userId }
+   203→
+   204→  if (reportType === 'last') {
+   205→    let lastTrade
+   206→    try {
+   207→      lastTrade = await db.trade.findFirst({
+   208→        where: { userId },
+   209→        orderBy: { executedAt: 'desc' },
+   210→      })
+   211→    } catch (dbError) {
+   212→      const message = dbError instanceof Error ? dbError.message : 'Unknown database error'
+   213→      console.error('[generateReport] Failed to fetch last trade:', message)
+   214→      return NextResponse.json(
+   215→        { error: `Failed to fetch trade data: ${message}` },
+   216→        { status: 500 }
+   217→      )
+   218→    }
+   219→    const trades = lastTrade ? [lastTrade] : []
+   220→    return await generatePDF(user, trades, reportType)
+   221→  }
+   222→
+   223→  if (reportType === 'monthly') {
+   224→    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
+   225→    tradesWhere = { userId, executedAt: { gte: thirtyDaysAgo } }
+   226→  }
+   227→
+   228→  let trades
+   229→  try {
+   230→    trades = await db.trade.findMany({
+   231→      where: tradesWhere,
+   232→      orderBy: { executedAt: 'desc' },
+   233→    })
+   234→  } catch (dbError) {
+   235→    const message = dbError instanceof Error ? dbError.message : 'Unknown database error'
+   236→    console.error('[generateReport] Failed to fetch trades:', message)
+   237→    return NextResponse.json(
+   238→      { error: `Failed to fetch trade data: ${message}` },
+   239→      { status: 500 }
+   240→    )
+   241→  }
+   242→
+   243→  return await generatePDF(user, trades, reportType)
+   244→}
+   245→
+   246→// ─── PDF Generation ─────────────────────────────────────────────────
+   247→async function generatePDF(
+   248→  user: {
+   249→    id: string
+   250→    name: string
+   251→    email: string
+   252→    virtualBalance: number
+   253→    totalTrades: number
+   254→    winRate: number
+   255→    totalPnl: number
+   256→    subscription: string
+   257→    createdAt: Date
+   258→  },
+   259→  trades: Array<{
+   260→    id: string
+   261→    userId: string
+   262→    segment: string
+   263→    productType?: string | null
+   264→    tradeDirection: string
+   265→    symbol: string
+   266→    optionType: string | null
+   267→    strikePrice: number | null
+   268→    expiryDate: Date | null
+   269→    quantity: number
+   270→    fillPrice: number
+   271→    totalValue: number
+   272→    brokerage: number
+   273→    pnl: number | null
+   274→    pnlPercent: number | null
+   275→    executedAt: Date
+   276→    squaredOffAt: Date | null
+   277→  }>,
+   278→  reportType: string,
+   279→): Promise<NextResponse> {
+   280→  let pdfDoc: PDFDocument
+   281→  try {
+   282→    pdfDoc = await PDFDocument.create()
+   283→  } catch (pdfError) {
+   284→    const message = pdfError instanceof Error ? pdfError.message : 'Unknown PDF creation error'
+   285→    console.error('[generatePDF] Failed to create PDF document:', message)
+   286→    return NextResponse.json(
+   287→      { error: `Failed to create PDF document: ${message}` },
+   288→      { status: 500 }
+   289→    )
+   290→  }
+   291→  const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold)
+   292→  const fontRegular = await pdfDoc.embedFont(StandardFonts.Helvetica)
+   293→
+   294→  const pageWidth = 595.28 // A4
+   295→  const pageHeight = 841.89
+   296→  const contentWidth = pageWidth - 100 // 50px margins each side
+   297→  let currentPage = pdfDoc.addPage([pageWidth, pageHeight])
+   298→  let y = pageHeight - 50
+   299→
+   300→  // ─── Helper: Check if we need a new page ─────────────────────────
+   301→  const ensureSpace = (needed: number) => {
+   302→    if (y - needed < 60) {
+   303→      // Draw footer on current page before switching
+   304→      drawFooter(currentPage, fontRegular, pageWidth, pageHeight)
+   305→      currentPage = pdfDoc.addPage([pageWidth, pageHeight])
+   306→      y = pageHeight - 50
+   307→    }
+   308→  }
+   309→
+   310→  // ─── HEADER SECTION ──────────────────────────────────────────────
+   311→  // Dark background bar
+   312→  currentPage.drawRectangle({
+   313→    x: 0,
+   314→    y: pageHeight - 90,
+   315→    width: pageWidth,
+   316→    height: 90,
+   317→    color: COLORS.headerBg,
+   318→  })
+   319→
+   320→  // Accent line
+   321→  currentPage.drawRectangle({
+   322→    x: 0,
+   323→    y: pageHeight - 93,
+   324→    width: pageWidth,
+   325→    height: 3,
+   326→    color: COLORS.accentLine,
+   327→  })
+   328→
+   329→  // App name
+   330→  currentPage.drawText('Pepertect', {
+   331→    x: 50,
+   332→    y: pageHeight - 35,
+   333→    size: 22,
+   334→    font: fontBold,
+   335→    color: COLORS.accentLine,
+   336→  })
+   337→
+   338→  currentPage.drawText('Paper Trading Report', {
+   339→    x: 50 + fontBold.widthOfTextAtSize('Pepertect', 22) + 10,
+   340→    y: pageHeight - 35,
+   341→    size: 16,
+   342→    font: fontRegular,
+   343→    color: COLORS.midGray,
+   344→  })
+   345→
+   346→  // Report type label
+   347→  const reportTypeLabel = {
+   348→    last: 'Last Trade Report',
+   349→    monthly: 'Monthly Report',
+   350→    full: 'Full Trading Report',
+   351→  }[reportType]
+   352→
+   353→  currentPage.drawText(reportTypeLabel, {
+   354→    x: 50,
+   355→    y: pageHeight - 58,
+   356→    size: 11,
+   357→    font: fontRegular,
+   358→    color: COLORS.midGray,
+   359→  })
+   360→
+   361→  // Date on right
+   362→  const dateStr = formatDate(new Date())
+   363→  const dateWidth = fontRegular.widthOfTextAtSize(dateStr, 11)
+   364→  currentPage.drawText(dateStr, {
+   365→    x: pageWidth - 50 - dateWidth,
+   366→    y: pageHeight - 58,
+   367→    size: 11,
+   368→    font: fontRegular,
+   369→    color: COLORS.midGray,
+   370→  })
+   371→
+   372→  y = pageHeight - 115
+   373→
+   374→  // ─── USER INFO SECTION ───────────────────────────────────────────
+   375→  ensureSpace(70)
+   376→  currentPage.drawRectangle({
+   377→    x: 40,
+   378→    y: y - 55,
+   379→    width: contentWidth + 20,
+   380→    height: 65,
+   381→    color: COLORS.sectionBg,
+   382→    borderRadius: 6,
+   383→  })
+   384→
+   385→  currentPage.drawText('User Information', {
+   386→    x: 50,
+   387→    y: y - 5,
+   388→    size: 12,
+   389→    font: fontBold,
+   390→    color: COLORS.darkBg,
+   391→  })
+   392→
+   393→  y -= 22
+   394→  currentPage.drawText(`Name: ${user.name}`, { x: 55, y, size: 10, font: fontRegular, color: COLORS.darkBg })
+   395→  currentPage.drawText(`User ID: ${user.id}`, { x: 320, y, size: 9, font: fontRegular, color: COLORS.midGray })
+   396→  y -= 16
+   397→  currentPage.drawText(`Email: ${user.email}`, { x: 55, y, size: 10, font: fontRegular, color: COLORS.darkBg })
+   398→  currentPage.drawText(`Plan: ${user.subscription}`, { x: 320, y, size: 10, font: fontRegular, color: COLORS.darkBg })
+   399→  y -= 16
+   400→  currentPage.drawText(`Account Balance: ${formatCurrency(user.virtualBalance)}`, { x: 55, y, size: 9, font: fontBold, color: COLORS.darkBg })
+   401→  currentPage.drawText(`Member since: ${formatDate(user.createdAt)}`, { x: 320, y, size: 10, font: fontRegular, color: COLORS.midGray })
+   402→
+   403→  y -= 35
+   404→
+   405→  // ─── TRADE DETAILS TABLE ─────────────────────────────────────────
+   406→  ensureSpace(60)
+   407→  currentPage.drawText('Trade Details', {
+   408→    x: 50,
+   409→    y,
+   410→    size: 14,
+   411→    font: fontBold,
+   412→    color: COLORS.darkBg,
+   413→  })
+   414→
+   415→  const tradeCountLabel = `${trades.length} trade${trades.length !== 1 ? 's' : ''}`
+   416→  const tradeCountWidth = fontRegular.widthOfTextAtSize(tradeCountLabel, 10)
+   417→  currentPage.drawText(tradeCountLabel, {
+   418→    x: 50 + fontBold.widthOfTextAtSize('Trade Details', 14) + 12,
+   419→    y: y + 2,
+   420→    size: 10,
+   421→    font: fontRegular,
+   422→    color: COLORS.midGray,
+   423→  })
+   424→
+   425→  y -= 10
+   426→
+   427→  if (trades.length === 0) {
+   428→    ensureSpace(40)
+   429→    y -= 20
+   430→    currentPage.drawText('No trades found for this report period.', {
+   431→      x: 50,
+   432→      y,
+   433→      size: 11,
+   434→      font: fontRegular,
+   435→      color: COLORS.midGray,
+   436→    })
+   437→    y -= 30
+   438→  } else {
+   439→    // Table headers
+   440→    const tableColumns = [
+   441→      { label: 'Symbol', width: 70 },
+   442→      { label: 'Type', width: 38 },
+   443→      { label: 'Entry Time', width: 82 },
+   444→      { label: 'Exit Time', width: 82 },
+   445→      { label: 'Qty', width: 32 },
+   446→      { label: 'Entry', width: 58 },
+   447→      { label: 'Exit', width: 58 },
+   448→      { label: 'Capital', width: 62 },
+   449→      { label: 'P&L', width: 75 },
+   450→    ]
+   451→
+   452→    y -= 25
+   453→    ensureSpace(20)
+   454→
+   455→    // Table header row
+   456→    currentPage.drawRectangle({
+   457→      x: 40,
+   458→      y: y - 4,
+   459→      width: contentWidth + 20,
+   460→      height: 20,
+   461→      color: COLORS.tableHeaderBg,
+   462→      borderRadius: 4,
+   463→    })
+   464→
+   465→    let colX = 48
+   466→    for (const col of tableColumns) {
+   467→      currentPage.drawText(col.label, {
+   468→        x: colX,
+   469→        y: y + 2,
+   470→        size: 8,
+   471→        font: fontBold,
+   472→        color: COLORS.white,
+   473→      })
+   474→      colX += col.width
+   475→    }
+   476→    y -= 24
+   477→
+   478→    // Table rows
+   479→    for (let i = 0; i < trades.length; i++) {
+   480→      const trade = trades[i]
+   481→      ensureSpace(22)
+   482→
+   483→      // Alternating row background
+   484→      const rowBg = i % 2 === 0 ? COLORS.tableRowEven : COLORS.tableRowOdd
+   485→      currentPage.drawRectangle({
+   486→        x: 40,
+   487→        y: y - 4,
+   488→        width: contentWidth + 20,
+   489→        height: 18,
+   490→        color: rowBg,
+   491→      })
+   492→
+   493→      const isBuy = trade.tradeDirection === 'BUY'
+   494→      const pnlValue = trade.pnl ?? 0
+   495→      const pnlColor = pnlValue >= 0 ? COLORS.green : COLORS.red
+   496→
+   497→      // Build symbol display (include option details if applicable)
+   498→      let symbolDisplay = trade.symbol
+   499→      if (trade.optionType && trade.strikePrice) {
+   500→        symbolDisplay = `${trade.symbol} ${trade.strikePrice}${trade.optionType}`
+   501→      }
+   502→
+   503→      // Truncate long symbols
+   504→      const maxSymbolLen = 12
+   505→      if (symbolDisplay.length > maxSymbolLen) {
+   506→        symbolDisplay = symbolDisplay.substring(0, maxSymbolLen - 1) + '…'
+   507→      }
+   508→
+   509→      const entryTime = formatDateTime(trade.executedAt)
+   510→      const exitTime = trade.squaredOffAt ? formatDateTime(trade.squaredOffAt) : 'Open'
+   511→
+   512→      // Calculate exit price from totalValue and fillPrice
+   513→      const exitPrice = trade.squaredOffAt && trade.pnl !== null
+   514→        ? trade.fillPrice + (pnlValue / trade.quantity)
+   515→        : trade.fillPrice
+   516→
+   517→      const rowValues = [
+   518→        { text: symbolDisplay, width: 70 },
+   519→        { text: isBuy ? 'BUY' : 'SELL', width: 38 },
+   520→        { text: entryTime.length > 14 ? entryTime.substring(0, 14) : entryTime, width: 82 },
+   521→        { text: exitTime.length > 14 ? exitTime.substring(0, 14) : exitTime, width: 82 },
+   522→        { text: String(trade.quantity), width: 32 },
+   523→        { text: `Rs.${trade.fillPrice.toFixed(2)}`, width: 58 },
+   524→        { text: `Rs.${exitPrice.toFixed(2)}`, width: 58 },
+   525→        { text: formatCurrency(trade.totalValue), width: 62 },
+   526→        { text: `${formatCurrency(pnlValue)} (${formatPercent(trade.pnlPercent)})`, width: 75 },
+   527→      ]
+   528→
+   529→      colX = 48
+   530→      for (let j = 0; j < rowValues.length; j++) {
+   531→        let textColor = COLORS.darkBg
+   532→        if (j === 1) textColor = isBuy ? COLORS.green : COLORS.red
+   533→        if (j === 8) textColor = pnlColor
+   534→
+   535→        // Truncate text if needed
+   536→        let text = rowValues[j].text
+   537→        const maxTextWidth = rowValues[j].width - 4
+   538→        while (fontRegular.widthOfTextAtSize(text, 7.5) > maxTextWidth && text.length > 3) {
+   539→          text = text.slice(0, -1)
+   540→        }
+   541→
+   542→        currentPage.drawText(text, {
+   543→          x: colX,
+   544→          y: y + 1,
+   545→          size: 7.5,
+   546→          font: fontRegular,
+   547→          color: textColor,
+   548→        })
+   549→        colX += rowValues[j].width
+   550→      }
+   551→      y -= 20
+   552→    }
+   553→    y -= 15
+   554→  }
+   555→
+   556→  // ─── PERFORMANCE SUMMARY ─────────────────────────────────────────
+   557→  ensureSpace(120)
+   558→  drawDivider(currentPage, y, contentWidth)
+   559→  y -= 20
+   560→
+   561→  currentPage.drawText('Performance Summary', {
+   562→    x: 50,
+   563→    y,
+   564→    size: 14,
+   565→    font: fontBold,
+   566→    color: COLORS.darkBg,
+   567→  })
+   568→  y -= 25
+   569→
+   570→  // Calculate stats
+   571→  const closedTrades = trades.filter((t) => t.pnl !== null)
+   572→  const totalPnlSum = closedTrades.reduce((sum, t) => sum + (t.pnl ?? 0), 0)
+   573→  const winningTrades = closedTrades.filter((t) => (t.pnl ?? 0) > 0).length
+   574→  const calculatedWinRate = closedTrades.length > 0 ? (winningTrades / closedTrades.length) * 100 : 0
+   575→  const bestTrade = closedTrades.length > 0
+   576→    ? closedTrades.reduce((best, t) => ((t.pnl ?? 0) > (best.pnl ?? 0) ? t : best))
+   577→    : null
+   578→  const worstTrade = closedTrades.length > 0
+   579→    ? closedTrades.reduce((worst, t) => ((t.pnl ?? 0) < (worst.pnl ?? 0) ? t : worst))
+   580→    : null
+   581→
+   582→  // Summary cards
+   583→  const totalBrokerage = trades.reduce((sum, t) => sum + (t.brokerage || 0), 0)
+   584→  const summaryItems = [
+   585→    { label: 'Total Trades', value: String(trades.length), color: COLORS.darkBg },
+   586→    { label: 'Win Rate', value: `${calculatedWinRate.toFixed(1)}%`, color: calculatedWinRate >= 50 ? COLORS.green : COLORS.red },
+   587→    { label: 'Net P&L', value: formatCurrency(totalPnlSum), color: totalPnlSum >= 0 ? COLORS.green : COLORS.red },
+   588→    { label: 'Total Brokerage', value: formatCurrency(totalBrokerage), color: COLORS.darkBg },
+   589→    { label: 'Best Trade', value: bestTrade ? formatCurrency(bestTrade.pnl) : 'N/A', color: bestTrade && bestTrade.pnl! >= 0 ? COLORS.green : COLORS.red },
+   590→  ]
+   591→
+   592→  const cardWidth = (contentWidth - 40) / summaryItems.length
+   593→  for (let i = 0; i < summaryItems.length; i++) {
+   594→    const item = summaryItems[i]
+   595→    const cardX = 50 + i * (cardWidth + 10)
+   596→
+   597→    currentPage.drawRectangle({
+   598→      x: cardX,
+   599→      y: y - 45,
+   600→      width: cardWidth,
+   601→      height: 50,
+   602→      color: COLORS.sectionBg,
+   603→      borderRadius: 6,
+   604→    })
+   605→
+   606→    // Accent top line
+   607→    currentPage.drawRectangle({
+   608→      x: cardX,
+   609→      y: y + 2,
+   610→      width: cardWidth,
+   611→      height: 3,
+   612→      color: item.color,
+   613→      borderRadius: 1,
+   614→    })
+   615→
+   616→    currentPage.drawText(item.label, {
+   617→      x: cardX + 8,
+   618→      y: y - 8,
+   619→      size: 8,
+   620→      font: fontRegular,
+   621→      color: COLORS.midGray,
+   622→    })
+   623→
+   624→    // Truncate value if needed
+   625→    let valueText = item.value
+   626→    while (fontBold.widthOfTextAtSize(valueText, 12) > cardWidth - 16 && valueText.length > 3) {
+   627→      valueText = valueText.slice(0, -1)
+   628→    }
+   629→
+   630→    currentPage.drawText(valueText, {
+   631→      x: cardX + 8,
+   632→      y: y - 28,
+   633→      size: 12,
+   634→      font: fontBold,
+   635→      color: item.color,
+   636→    })
+   637→  }
+   638→
+   639→  y -= 65
+   640→
+   641→  // ─── AI ANALYSIS SECTION ─────────────────────────────────────────
+   642→  ensureSpace(130)
+   643→  drawDivider(currentPage, y, contentWidth)
+   644→  y -= 20
+   645→
+   646→  currentPage.drawText('AI Analysis', {
+   647→    x: 50,
+   648→    y,
+   649→    size: 14,
+   650→    font: fontBold,
+   651→    color: COLORS.darkBg,
+   652→  })
+   653→  y -= 25
+   654→
+   655→  // Analyze trades
+   656→  const issues: string[] = []
+   657→  const suggestions: string[] = []
+   658→
+   659→  // Check for no stop-loss (trades without squaredOffAt)
+   660→  const openTrades = trades.filter((t) => !t.squaredOffAt)
+   661→  if (openTrades.length > 0) {
+   662→    issues.push(`No stop-loss detected: ${openTrades.length} trade${openTrades.length > 1 ? 's' : ''} without exit records.`)
+   663→    suggestions.push('Consider using stop-loss to limit losses.')
+   664→  }
+   665→
+   666→  // Check for overtrading (more than 20 trades in a single day)
+   667→  const tradesByDay: Record<string, number> = {}
+   668→  for (const trade of trades) {
+   669→    const dayKey = trade.executedAt.toISOString().split('T')[0]
+   670→    tradesByDay[dayKey] = (tradesByDay[dayKey] || 0) + 1
+   671→  }
+   672→  const overtradingDays = Object.entries(tradesByDay).filter(([, count]) => count > 20)
+   673→  if (overtradingDays.length > 0) {
+   674→    issues.push(`Overtrading detected: ${overtradingDays.length} day${overtradingDays.length > 1 ? 's' : ''} with more than 20 trades.`)
+   675→    suggestions.push('Avoid overtrading - quality over quantity.')
+   676→  }
+   677→
+   678→  // Additional analysis
+   679→  if (calculatedWinRate < 40 && closedTrades.length >= 5) {
+   680→    issues.push(`Low win rate: ${calculatedWinRate.toFixed(1)}% across ${closedTrades.length} closed trades.`)
+   681→    suggestions.push('Review your trading strategy and focus on higher-probability setups.')
+   682→  }
+   683→
+   684→  if (totalPnlSum < 0 && closedTrades.length >= 3) {
+   685→    issues.push(`Net losses of ${formatCurrency(totalPnlSum)} detected.`)
+   686→    suggestions.push('Consider reducing position sizes and improving risk management.')
+   687→  }
+   688→
+   689→  // Positive feedback
+   690→  if (calculatedWinRate >= 60 && closedTrades.length >= 5) {
+   691→    suggestions.push('Good win rate! Keep maintaining your discipline and strategy.')
+   692→  }
+   693→
+   694→  if (issues.length === 0 && trades.length > 0) {
+   695→    issues.push('No significant issues detected in the current trade set.')
+   696→  }
+   697→
+   698→  if (trades.length === 0) {
+   699→    issues.push('No trades to analyze. Start paper trading to get AI insights.')
+   700→  }
+   701→
+   702→  // Draw issues
+   703→  if (issues.length > 0) {
+   704→    currentPage.drawRectangle({
+   705→      x: 40,
+   706→      y: y - issues.length * 20 - 10,
+   707→      width: contentWidth + 20,
+   708→      height: issues.length * 20 + 20,
+   709→      color: COLORS.warningBg,
+   710→      borderRadius: 6,
+   711→    })
+   712→
+   713→    let issueY = y
+   714→    for (const issue of issues) {
+   715→      currentPage.drawText('!', { x: 55, y: issueY, size: 10, font: fontBold, color: COLORS.warningText })
+   716→      let issueText = `  ${issue}`
+   717→      while (fontRegular.widthOfTextAtSize(issueText, 9) > contentWidth - 10 && issueText.length > 5) {
+   718→        issueText = issueText.slice(0, -1)
+   719→      }
+   720→      currentPage.drawText(issueText, { x: 68, y: issueY, size: 9, font: fontRegular, color: COLORS.warningText })
+   721→      issueY -= 20
+   722→    }
+   723→    y = issueY - 10
+   724→  }
+   725→
+   726→  // Draw suggestions
+   727→  if (suggestions.length > 0) {
+   728→    ensureSpace(suggestions.length * 18 + 25)
+   729→
+   730→    currentPage.drawText('Suggestions:', {
+   731→      x: 50,
+   732→      y,
+   733→      size: 10,
+   734→      font: fontBold,
+   735→      color: COLORS.darkBg,
+   736→    })
+   737→    y -= 16
+   738→
+   739→    for (const suggestion of suggestions) {
+   740→      ensureSpace(18)
+   741→      currentPage.drawText('•', { x: 55, y, size: 10, font: fontRegular, color: COLORS.accentLine })
+   742→      y = drawWrappedText(currentPage, suggestion, fontRegular, 65, y, contentWidth - 20, 9, COLORS.darkBg)
+   743→      y -= 4
+   744→    }
+   745→    y -= 6
+   746→  }
+   747→
+   748→  // ─── FOOTER ──────────────────────────────────────────────────────
+   749→  drawFooter(currentPage, fontRegular, pageWidth, pageHeight)
+   750→
+   751→  // ─── Return PDF ──────────────────────────────────────────────────
+   752→  let pdfBytes: Uint8Array
+   753→  try {
+   754→    pdfBytes = await pdfDoc.save()
+   755→  } catch (saveError) {
+   756→    const message = saveError instanceof Error ? saveError.message : 'Unknown PDF save error'
+   757→    console.error('[generatePDF] Failed to save PDF:', message)
+   758→    return NextResponse.json(
+   759→      { error: `Failed to save PDF document: ${message}` },
+   760→      { status: 500 }
+   761→    )
+   762→  }
+   763→
+   764→  return new NextResponse(pdfBytes, {
+   765→    status: 200,
+   766→    headers: {
+   767→      'Content-Type': 'application/pdf',
+   768→      'Content-Disposition': 'attachment; filename="pepertect-report.pdf"',
+   769→    },
+   770→  })
+   771→}
+   772→
+   773→// ─── Draw Footer ────────────────────────────────────────────────────
+   774→function drawFooter(
+   775→  page: ReturnType<PDFDocument['addPage']>,
+   776→  font: ReturnType<PDFDocument['embedFont']>,
+   777→  pageWidth: number,
+   778→  pageHeight: number,
+   779→) {
+   780→  // Footer background
+   781→  page.drawRectangle({
+   782→    x: 0,
+   783→    y: 0,
+   784→    width: pageWidth,
+   785→    height: 50,
+   786→    color: COLORS.headerBg,
+   787→  })
+   788→
+   789→  // Accent line
+   790→  page.drawRectangle({
+   791→    x: 0,
+   792→    y: 50,
+   793→    width: pageWidth,
+   794→    height: 2,
+   795→    color: COLORS.accentLine,
+   796→  })
+   797→
+   798→  // Disclaimer
+   799→  const disclaimer = 'This is a paper trading report for educational purposes only. No real money was involved. This is not financial advice.'
+   800→  page.drawText(disclaimer, {
+   801→    x: 50,
+   802→    y: 30,
+   803→    size: 7,
+   804→    font,
+   805→    color: COLORS.midGray,
+   806→  })
+   807→
+   808→  // Generated timestamp
+   809→  const timestamp = `Generated: ${new Date().toISOString()}`
+   810→  const tsWidth = font.widthOfTextAtSize(timestamp, 7)
+   811→  page.drawText(timestamp, {
+   812→    x: pageWidth - 50 - tsWidth,
+   813→    y: 30,
+   814→    size: 7,
+   815→    font,
+   816→    color: COLORS.midGray,
+   817→  })
+   818→
+   819→  // Pepertect branding
+   820→  page.drawText('Pepertect Paper Trading', {
+   821→    x: 50,
+   822→    y: 16,
+   823→    size: 7,
+   824→    font,
+   825→    color: COLORS.accentLine,
+   826→  })
+   827→}
+   828→

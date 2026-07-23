@@ -1,0 +1,527 @@
+     1→'use client'
+     2→
+     3→import { useState, useEffect, useCallback } from 'react'
+     4→import {
+     5→  Ticket, Search, MessageSquare, Clock, CheckCircle, CircleDot, XCircle,
+     6→  Eye, Reply, Send, Loader2, ChevronDown, AlertCircle
+     7→} from 'lucide-react'
+     8→import { Button } from '@/components/ui/button'
+     9→import { Input } from '@/components/ui/input'
+    10→import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+    11→import { Badge } from '@/components/ui/badge'
+    12→import {
+    13→  Table, TableBody, TableCell, TableHead, TableHeader, TableRow
+    14→} from '@/components/ui/table'
+    15→import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
+    16→import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+    17→import { Label } from '@/components/ui/label'
+    18→import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+    19→import { Separator } from '@/components/ui/separator'
+    20→import { toast } from 'sonner'
+    21→import {
+    22→  adminApi, formatDate, formatTimeAgo, LoadingSkeleton,
+    23→  EmptyState, SimplePagination, StatCard, AdminErrorBoundary
+    24→} from '@/components/admin/shared'
+    25→
+    26→// ─── Types ───────────────────────────────────────────────────────────────────
+    27→type TicketStatus = 'OPEN' | 'IN_PROGRESS' | 'RESOLVED' | 'CLOSED'
+    28→type TicketPriority = 'HIGH' | 'MEDIUM' | 'LOW'
+    29→
+    30→interface SupportTicket {
+    31→  id: string
+    32→  userId: string
+    33→  userName: string
+    34→  userEmail: string
+    35→  subject: string
+    36→  description: string
+    37→  priority: TicketPriority
+    38→  status: TicketStatus
+    39→  createdAt: string
+    40→  updatedAt: string
+    41→  replies: { id: string; message: string; isAdmin: boolean; createdAt: string }[]
+    42→}
+    43→
+    44→// ─── Mock Data ───────────────────────────────────────────────────────────────
+    45→const mockTickets: SupportTicket[] = [
+    46→  {
+    47→    id: 'TKT-1001', userId: 'usr_1003', userName: 'Rahul Verma', userEmail: 'rahul.verma@gmail.com',
+    48→    subject: 'Option chain data not loading for NIFTY 24000 CE',
+    49→    description: 'When I try to view the option chain for NIFTY 24000 CE, the data keeps showing a loading spinner. Other strikes load fine. I have tried clearing cache and logging back in but the issue persists. This started happening after the latest app update yesterday.',
+    50→    priority: 'HIGH', status: 'OPEN', createdAt: '2025-01-15T09:32:00.000Z', updatedAt: '2025-01-15T09:32:00.000Z', replies: []
+    51→  },
+    52→  {
+    53→    id: 'TKT-1002', userId: 'usr_1007', userName: 'Kavita Reddy', userEmail: 'kavita.reddy@yahoo.com',
+    54→    subject: 'Virtual balance showing incorrect after trade execution',
+    55→    description: 'I placed a BUY order for RELIANCE 2900 CE with 50 qty. The order shows executed but my balance was not deducted properly. It shows ₹1,02,500 instead of the expected amount. Please check and fix this urgently.',
+    56→    priority: 'HIGH', status: 'IN_PROGRESS', createdAt: '2025-01-14T14:18:00.000Z', updatedAt: '2025-01-15T08:45:00.000Z',
+    57→    replies: [{ id: 'r1', message: 'We are looking into this. Can you share the trade ID?', isAdmin: true, createdAt: '2025-01-14T15:00:00.000Z' }]
+    58→  },
+    59→  {
+    60→    id: 'TKT-1003', userId: 'usr_1012', userName: 'Manish Tiwari', userEmail: 'manish.t@outlook.com',
+    61→    subject: 'Request for premium subscription refund',
+    62→    description: 'I upgraded to premium 2 days ago but I am not satisfied with the features. The real-time data still has 5 second delay. I would like to request a full refund as per your refund policy. My transaction ID is TXN789456.',
+    63→    priority: 'MEDIUM', status: 'OPEN', createdAt: '2025-01-15T11:05:00.000Z', updatedAt: '2025-01-15T11:05:00.000Z', replies: []
+    64→  },
+    65→  {
+    66→    id: 'TKT-1004', userId: 'usr_1018', userName: 'Divya Iyengar', userEmail: 'divya.iyengar@gmail.com',
+    67→    subject: 'Unable to place SELL order for open position',
+    68→    description: 'I have an open BUY position in BANKNIFTY 50000 PE but the SELL button is greyed out. I have sufficient balance and the market is open. Other positions can be squared off normally.',
+    69→    priority: 'HIGH', status: 'IN_PROGRESS', createdAt: '2025-01-13T10:22:00.000Z', updatedAt: '2025-01-14T16:30:00.000Z',
+    70→    replies: [
+    71→      { id: 'r1', message: 'Thank you for reporting. We have identified the issue - it is related to lot size mismatch. Our team is deploying a fix.', isAdmin: true, createdAt: '2025-01-13T11:15:00.000Z' },
+    72→      { id: 'r2', message: 'Any update on this? The position is still stuck.', isAdmin: false, createdAt: '2025-01-14T10:00:00.000Z' },
+    73→      { id: 'r3', message: 'Fix is being tested. Should be live in next 2 hours.', isAdmin: true, createdAt: '2025-01-14T16:30:00.000Z' }
+    74→    ]
+    75→  },
+    76→  {
+    77→    id: 'TKT-1005', userId: 'usr_1025', userName: 'Nitin Deshmukh', userEmail: 'nitin.d@hdfc.com',
+    78→    subject: 'How to set up auto-exit stop loss?',
+    79→    description: 'I have been trying to configure auto-exit SL for my options positions but I am not sure about the exact steps. The help page does not explain it clearly. Can you guide me through the process?',
+    80→    priority: 'LOW', status: 'RESOLVED', createdAt: '2025-01-12T08:45:00.000Z', updatedAt: '2025-01-13T09:10:00.000Z',
+    81→    replies: [
+    82→      { id: 'r1', message: 'Sure! Go to your open position, click on the SL icon, set your stop loss price and hit "Set SL". The system will auto-square off when the price hits your SL level.', isAdmin: true, createdAt: '2025-01-12T09:30:00.000Z' },
+    83→      { id: 'r2', message: 'Thanks! That was easy. Appreciate the quick help.', isAdmin: false, createdAt: '2025-01-12T10:15:00.000Z' }
+    84→    ]
+    85→  },
+    86→  {
+    87→    id: 'TKT-1006', userId: 'usr_1031', userName: 'Swati Bhatt', userEmail: 'swati.b@icici.com',
+    88→    subject: 'Chart not updating in real-time for stock overview',
+    89→    description: 'The candlestick chart on the stock overview page is stuck and not showing live candles. It was working fine till yesterday. I am using Chrome on Android. Please fix this.',
+    90→    priority: 'MEDIUM', status: 'OPEN', createdAt: '2025-01-15T13:40:00.000Z', updatedAt: '2025-01-15T13:40:00.000Z', replies: []
+    91→  },
+    92→  {
+    93→    id: 'TKT-1007', userId: 'usr_1001', userName: 'Arjun Mehta', userEmail: 'arjun.mehta@gmail.com',
+    94→    subject: 'Account locked after multiple login attempts',
+    95→    description: 'I forgot my password and tried logging in multiple times. Now my account is locked. I have already tried the password reset link but it says "account temporarily locked". Please unlock my account.',
+    96→    priority: 'HIGH', status: 'RESOLVED', createdAt: '2025-01-11T16:20:00.000Z', updatedAt: '2025-01-12T08:00:00.000Z',
+    97→    replies: [
+    98→      { id: 'r1', message: 'Your account has been unlocked. You should now be able to log in with your new password.', isAdmin: true, createdAt: '2025-01-12T08:00:00.000Z' }
+    99→    ]
+   100→  },
+   101→  {
+   102→    id: 'TKT-1008', userId: 'usr_1015', userName: 'Ritu Saxena', userEmail: 'ritu.saxena@hotmail.com',
+   103→    subject: 'Feature request: Portfolio heatmap view',
+   104→    description: 'It would be great if we could see a portfolio heatmap showing P&L across all our positions. Similar to what Zerodha has. This would make it much easier to quickly see which positions are profitable and which are losing.',
+   105→    priority: 'LOW', status: 'OPEN', createdAt: '2025-01-14T17:30:00.000Z', updatedAt: '2025-01-14T17:30:00.000Z', replies: []
+   106→  },
+   107→  {
+   108→    id: 'TKT-1009', userId: 'usr_1040', userName: 'Praveen Yadav', userEmail: 'praveen.y@tcs.com',
+   109→    subject: 'Duplicate orders being placed on fast clicks',
+   110→    description: 'When I quickly double-click the "Buy" button, two orders are getting placed instead of one. This has happened 3 times now and I have lost virtual money due to this. Please add a debounce or disable the button after first click.',
+   111→    priority: 'MEDIUM', status: 'CLOSED', createdAt: '2025-01-10T09:15:00.000Z', updatedAt: '2025-01-12T14:00:00.000Z',
+   112→    replies: [
+   113→      { id: 'r1', message: 'We have added button debouncing to prevent duplicate orders. This fix is now live. Thank you for the feedback!', isAdmin: true, createdAt: '2025-01-12T14:00:00.000Z' }
+   114→    ]
+   115→  },
+   116→  {
+   117→    id: 'TKT-1010', userId: 'usr_1009', userName: 'Meera Joshi', userEmail: 'meera.j@infosys.com',
+   118→    subject: 'Watchlist items disappearing after page refresh',
+   119→    description: 'I added 8 stocks to my watchlist but every time I refresh the page, only 3-4 of them remain. The others disappear randomly. This is very frustrating. I am using the latest version of Chrome.',
+   120→    priority: 'MEDIUM', status: 'IN_PROGRESS', createdAt: '2025-01-15T07:55:00.000Z', updatedAt: '2025-01-15T10:20:00.000Z',
+   121→    replies: [{ id: 'r1', message: 'We can reproduce this issue. It seems to be related to the local storage sync. A fix is in progress.', isAdmin: true, createdAt: '2025-01-15T10:20:00.000Z' }]
+   122→  },
+   123→]
+   124→
+   125→// ─── Priority & Status configs ───────────────────────────────────────────────
+   126→const priorityConfig: Record<TicketPriority, { color: string; label: string }> = {
+   127→  HIGH: { color: '#d44a2d', label: 'High' },
+   128→  MEDIUM: { color: '#F59E0B', label: 'Medium' },
+   129→  LOW: { color: '#3B82F6', label: 'Low' },
+   130→}
+   131→
+   132→const statusConfig: Record<TicketStatus, { color: string; bg: string; border: string; label: string; icon: React.ComponentType<{ className?: string }> }> = {
+   133→  OPEN: { color: '#3B82F6', bg: '#3B82F6/10', border: '#3B82F6/30', label: 'Open', icon: CircleDot },
+   134→  IN_PROGRESS: { color: '#F59E0B', bg: '#F59E0B/10', border: '#F59E0B/30', label: 'In Progress', icon: Clock },
+   135→  RESOLVED: { color: '#00a87d', bg: '#00a87d/10', border: '#00a87d/30', label: 'Resolved', icon: CheckCircle },
+   136→  CLOSED: { color: 'var(--muted-foreground)', bg: '#6b7280/10', border: '#6b7280/30', label: 'Closed', icon: XCircle },
+   137→}
+   138→
+   139→// ─── Tickets Page Inner ──────────────────────────────────────────────────────
+   140→function TicketsPageInner() {
+   141→  const [tickets, setTickets] = useState<SupportTicket[]>([])
+   142→  const [loading, setLoading] = useState(true)
+   143→  const [search, setSearch] = useState('')
+   144→  const [statusFilter, setStatusFilter] = useState<string>('All')
+   145→  const [page, setPage] = useState(1)
+   146→  const [selectedTicket, setSelectedTicket] = useState<SupportTicket | null>(null)
+   147→  const [replyText, setReplyText] = useState('')
+   148→  const [sendingReply, setSendingReply] = useState(false)
+   149→  const [changingStatus, setChangingStatus] = useState(false)
+   150→  const limit = 10
+   151→
+   152→  const fetchTickets = useCallback(async () => {
+   153→    setLoading(true)
+   154→    try {
+   155→      const res = await adminApi('/tickets')
+   156→      const data = await res.json()
+   157→      const mapped = (data.tickets || []).map((t: any) => ({
+   158→        id: t.id,
+   159→        userId: t.userId,
+   160→        userName: t.userName || t.user?.name || 'Unknown',
+   161→        userEmail: t.userEmail || t.user?.email || '',
+   162→        subject: t.subject,
+   163→        description: t.description,
+   164→        priority: t.priority,
+   165→        status: t.status,
+   166→        createdAt: t.createdAt,
+   167→        updatedAt: t.updatedAt,
+   168→        replies: (t.replies || []).map((r: any) => ({
+   169→          id: r.id,
+   170→          message: r.message,
+   171→          isAdmin: r.isAdmin,
+   172→          createdAt: r.createdAt,
+   173→        })),
+   174→      }))
+   175→      setTickets(mapped)
+   176→    } catch {
+   177→      console.warn('[TicketsPage] API fetch failed, using mock data')
+   178→      setTickets(mockTickets)
+   179→    } finally {
+   180→      setLoading(false)
+   181→    }
+   182→  }, [])
+   183→
+   184→  useEffect(() => { fetchTickets() }, [fetchTickets])
+   185→
+   186→  // Filter
+   187→  const filteredTickets = tickets.filter((t) => {
+   188→    if (statusFilter !== 'All' && t.status !== statusFilter) return false
+   189→    if (search) {
+   190→      const q = search.toLowerCase()
+   191→      return t.subject.toLowerCase().includes(q) || t.userName.toLowerCase().includes(q) || t.id.toLowerCase().includes(q)
+   192→    }
+   193→    return true
+   194→  })
+   195→
+   196→  // Pagination
+   197→  const totalPages = Math.ceil(filteredTickets.length / limit)
+   198→  const paginatedTickets = filteredTickets.slice((page - 1) * limit, page * limit)
+   199→
+   200→  // Stats
+   201→  const openCount = tickets.filter(t => t.status === 'OPEN').length
+   202→  const inProgressCount = tickets.filter(t => t.status === 'IN_PROGRESS').length
+   203→  const resolvedCount = tickets.filter(t => t.status === 'RESOLVED').length
+   204→
+   205→  const handleSendReply = async () => {
+   206→    if (!replyText.trim() || !selectedTicket) return
+   207→    setSendingReply(true)
+   208→    try {
+   209→      await adminApi(`/tickets/${selectedTicket.id}`, {
+   210→        method: 'POST',
+   211→        body: JSON.stringify({ message: replyText, isAdmin: true }),
+   212→      })
+   213→      const newReply = { id: `r_${Date.now()}`, message: replyText, isAdmin: true, createdAt: new Date().toISOString() }
+   214→      const updated = { ...selectedTicket, replies: [...selectedTicket.replies, newReply] }
+   215→      setSelectedTicket(updated)
+   216→      setTickets(prev => prev.map(t => t.id === updated.id ? updated : t))
+   217→      setReplyText('')
+   218→      toast.success('Reply sent')
+   219→    } catch {
+   220→      const newReply = { id: `r_${Date.now()}`, message: replyText, isAdmin: true, createdAt: new Date().toISOString() }
+   221→      const updated = { ...selectedTicket, replies: [...selectedTicket.replies, newReply] }
+   222→      setSelectedTicket(updated)
+   223→      setTickets(prev => prev.map(t => t.id === updated.id ? updated : t))
+   224→      setReplyText('')
+   225→      toast.success('Reply sent')
+   226→    } finally {
+   227→      setSendingReply(false)
+   228→    }
+   229→  }
+   230→
+   231→  const handleStatusChange = async (newStatus: string) => {
+   232→    if (!selectedTicket) return
+   233→    setChangingStatus(true)
+   234→    try {
+   235→      await adminApi(`/tickets/${selectedTicket.id}`, {
+   236→        method: 'PUT',
+   237→        body: JSON.stringify({ status: newStatus }),
+   238→      })
+   239→      const updated = { ...selectedTicket, status: newStatus as TicketStatus, updatedAt: new Date().toISOString() }
+   240→      setSelectedTicket(updated)
+   241→      setTickets(prev => prev.map(t => t.id === updated.id ? updated : t))
+   242→      toast.success(`Ticket status changed to ${statusConfig[newStatus as TicketStatus]?.label || newStatus}`)
+   243→    } catch {
+   244→      const updated = { ...selectedTicket, status: newStatus as TicketStatus, updatedAt: new Date().toISOString() }
+   245→      setSelectedTicket(updated)
+   246→      setTickets(prev => prev.map(t => t.id === updated.id ? updated : t))
+   247→      toast.success(`Ticket status changed to ${statusConfig[newStatus as TicketStatus]?.label || newStatus}`)
+   248→    } finally {
+   249→      setChangingStatus(false)
+   250→    }
+   251→  }
+   252→
+   253→  const handleCloseTicket = async () => {
+   254→    if (!selectedTicket) return
+   255→    await handleStatusChange('CLOSED')
+   256→  }
+   257→
+   258→  const statusFilters = ['All', 'OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED']
+   259→
+   260→  return (
+   261→    <div className="space-y-6">
+   262→      {/* Stats Row */}
+   263→      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+   264→        <StatCard icon={CircleDot} label="Open Tickets" value={openCount} sub="Needs attention" color="#3B82F6" />
+   265→        <StatCard icon={Clock} label="In Progress" value={inProgressCount} sub="Being worked on" color="#F59E0B" />
+   266→        <StatCard icon={CheckCircle} label="Resolved" value={resolvedCount} sub="This week" color="#00a87d" />
+   267→        <StatCard icon={Clock} label="Avg Response" value="< 2h" sub="Response time" color="#8B5CF6" />
+   268→      </div>
+   269→
+   270→      {/* Filter Bar */}
+   271→      <Card className="bg-card border-border rounded-xl">
+   272→        <CardContent className="p-4">
+   273→          <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+   274→            <div className="relative flex-1">
+   275→              <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+   276→              <Input
+   277→                placeholder="Search tickets by ID, subject, or user..."
+   278→                value={search}
+   279→                onChange={(e) => { setSearch(e.target.value); setPage(1) }}
+   280→                className="rounded-lg border-border bg-muted text-foreground pl-10 h-10"
+   281→              />
+   282→            </div>
+   283→            <div className="inline-flex items-center gap-1 rounded-full bg-muted p-1 border border-border overflow-x-auto">
+   284→              {statusFilters.map((f) => (
+   285→                <button
+   286→                  key={f}
+   287→                  onClick={() => { setStatusFilter(f); setPage(1) }}
+   288→                  className={`whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-semibold transition-colors ${
+   289→                    statusFilter === f ? 'bg-[#00D09C] text-white' : 'text-muted-foreground hover:text-foreground'
+   290→                  }`}
+   291→                >
+   292→                  {f === 'IN_PROGRESS' ? 'In Progress' : f.charAt(0) + f.slice(1).toLowerCase()}
+   293→                </button>
+   294→              ))}
+   295→            </div>
+   296→          </div>
+   297→        </CardContent>
+   298→      </Card>
+   299→
+   300→      {/* Tickets Table */}
+   301→      <Card className="bg-card border-border rounded-xl">
+   302→        <CardHeader className="pb-2">
+   303→          <CardTitle className="text-sm font-semibold text-foreground">
+   304→            Support Tickets ({filteredTickets.length})
+   305→          </CardTitle>
+   306→        </CardHeader>
+   307→        <CardContent>
+   308→          {loading ? (
+   309→            <LoadingSkeleton rows={8} />
+   310→          ) : paginatedTickets.length === 0 ? (
+   311→            <EmptyState icon={Ticket} title="No tickets found" description="No support tickets match the current filters." />
+   312→          ) : (
+   313→            <>
+   314→              <div className="overflow-x-auto">
+   315→                <Table>
+   316→                  <TableHeader>
+   317→                    <TableRow className="border-border hover:bg-transparent">
+   318→                      <TableHead className="text-muted-foreground text-xs">ID</TableHead>
+   319→                      <TableHead className="text-muted-foreground text-xs">User</TableHead>
+   320→                      <TableHead className="text-muted-foreground text-xs">Subject</TableHead>
+   321→                      <TableHead className="text-muted-foreground text-xs">Priority</TableHead>
+   322→                      <TableHead className="text-muted-foreground text-xs">Status</TableHead>
+   323→                      <TableHead className="text-muted-foreground text-xs hidden md:table-cell">Created</TableHead>
+   324→                      <TableHead className="text-right text-muted-foreground text-xs">Actions</TableHead>
+   325→                    </TableRow>
+   326→                  </TableHeader>
+   327→                  <TableBody>
+   328→                    {paginatedTickets.map((ticket) => {
+   329→                      const pCfg = priorityConfig[ticket.priority]
+   330→                      const sCfg = statusConfig[ticket.status]
+   331→                      const StatusIcon = sCfg.icon
+   332→                      return (
+   333→                        <TableRow key={ticket.id} className="border-border hover:bg-muted">
+   334→                          <TableCell className="font-mono text-xs text-muted-foreground">{ticket.id}</TableCell>
+   335→                          <TableCell>
+   336→                            <div className="flex items-center gap-2">
+   337→                              <Avatar className="size-7">
+   338→                                <AvatarFallback className="bg-[#00D09C]/10 text-[#00D09C] text-[10px] font-semibold">
+   339→                                  {ticket.userName.split(' ').map(n => n[0]).join('')}
+   340→                                </AvatarFallback>
+   341→                              </Avatar>
+   342→                              <div>
+   343→                                <p className="text-xs font-medium text-foreground">{ticket.userName}</p>
+   344→                                <p className="text-[10px] text-muted-foreground hidden sm:block">{ticket.userEmail}</p>
+   345→                              </div>
+   346→                            </div>
+   347→                          </TableCell>
+   348→                          <TableCell className="max-w-[200px]">
+   349→                            <p className="text-xs text-foreground truncate">{ticket.subject}</p>
+   350→                          </TableCell>
+   351→                          <TableCell>
+   352→                            <Badge variant="outline" className="text-[10px] font-semibold" style={{ borderColor: `${pCfg.color}40`, backgroundColor: `${pCfg.color}12`, color: pCfg.color }}>
+   353→                              {pCfg.label}
+   354→                            </Badge>
+   355→                          </TableCell>
+   356→                          <TableCell>
+   357→                            <Badge variant="outline" className="text-[10px] font-semibold gap-1" style={{ borderColor: `${sCfg.color}40`, backgroundColor: `${sCfg.color}12`, color: sCfg.color }}>
+   358→                              <StatusIcon className="size-3" />
+   359→                              {sCfg.label}
+   360→                            </Badge>
+   361→                          </TableCell>
+   362→                          <TableCell className="text-[11px] text-muted-foreground hidden md:table-cell">{formatDate(ticket.createdAt)}</TableCell>
+   363→                          <TableCell className="text-right">
+   364→                            <Button
+   365→                              variant="ghost"
+   366→                              size="sm"
+   367→                              className="size-7 text-muted-foreground hover:text-[#00D09C]"
+   368→                              onClick={() => setSelectedTicket(ticket)}
+   369→                            >
+   370→                              <Eye className="size-3.5" />
+   371→                            </Button>
+   372→                          </TableCell>
+   373→                        </TableRow>
+   374→                      )
+   375→                    })}
+   376→                  </TableBody>
+   377→                </Table>
+   378→              </div>
+   379→              <SimplePagination page={page} totalPages={totalPages} onPageChange={setPage} />
+   380→            </>
+   381→          )}
+   382→        </CardContent>
+   383→      </Card>
+   384→
+   385→      {/* Ticket Detail Dialog */}
+   386→      <Dialog open={!!selectedTicket} onOpenChange={() => setSelectedTicket(null)}>
+   387→        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+   388→          {selectedTicket && (
+   389→            <>
+   390→              <DialogHeader>
+   391→                <div className="flex items-start justify-between gap-4">
+   392→                  <div className="flex-1 min-w-0">
+   393→                    <div className="flex items-center gap-2 mb-1.5">
+   394→                      <Badge variant="outline" className="text-[10px] font-mono" style={{ borderColor: `${priorityConfig[selectedTicket.priority].color}40`, backgroundColor: `${priorityConfig[selectedTicket.priority].color}12`, color: priorityConfig[selectedTicket.priority].color }}>
+   395→                        {priorityConfig[selectedTicket.priority].label}
+   396→                      </Badge>
+   397→                      <Badge variant="outline" className="text-[10px] font-semibold gap-1" style={{ borderColor: `${statusConfig[selectedTicket.status].color}40`, backgroundColor: `${statusConfig[selectedTicket.status].color}12`, color: statusConfig[selectedTicket.status].color }}>
+   398→                        {(() => { const SIcon = statusConfig[selectedTicket.status].icon; return <SIcon className="size-3" /> })()}
+   399→                        {statusConfig[selectedTicket.status].label}
+   400→                      </Badge>
+   401→                    </div>
+   402→                    <DialogTitle className="text-sm font-semibold text-foreground leading-snug">{selectedTicket.subject}</DialogTitle>
+   403→                    <DialogDescription className="text-xs text-muted-foreground mt-1">{selectedTicket.id} · Created {formatDate(selectedTicket.createdAt)} · Updated {formatTimeAgo(selectedTicket.updatedAt)}</DialogDescription>
+   404→                  </div>
+   405→                </div>
+   406→              </DialogHeader>
+   407→
+   408→              {/* User Info */}
+   409→              <div className="flex items-center gap-3 p-3 rounded-xl bg-muted border border-border">
+   410→                <Avatar className="size-10">
+   411→                  <AvatarFallback className="bg-[#00D09C]/10 text-[#00D09C] text-sm font-semibold">
+   412→                    {selectedTicket.userName.split(' ').map(n => n[0]).join('')}
+   413→                  </AvatarFallback>
+   414→                </Avatar>
+   415→                <div>
+   416→                  <p className="text-xs font-semibold text-foreground">{selectedTicket.userName}</p>
+   417→                  <p className="text-[11px] text-muted-foreground">{selectedTicket.userEmail}</p>
+   418→                </div>
+   419→              </div>
+   420→
+   421→              {/* Description */}
+   422→              <div className="space-y-2">
+   423→                <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">Description</p>
+   424→                <p className="text-xs text-foreground leading-relaxed">{selectedTicket.description}</p>
+   425→              </div>
+   426→
+   427→              <Separator />
+   428→
+   429→              {/* Replies */}
+   430→              {selectedTicket.replies.length > 0 && (
+   431→                <div className="space-y-3">
+   432→                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">Conversation ({selectedTicket.replies.length})</p>
+   433→                  <div className="space-y-3 max-h-48 overflow-y-auto">
+   434→                    {selectedTicket.replies.map((reply) => (
+   435→                      <div key={reply.id} className={`p-3 rounded-xl border ${reply.isAdmin ? 'bg-[#00D09C]/5 border-[#00D09C]/20 ml-6' : 'bg-muted border-border mr-6'}`}>
+   436→                        <div className="flex items-center justify-between mb-1.5">
+   437→                          <p className="text-[10px] font-semibold" style={{ color: reply.isAdmin ? '#00a87d' : 'var(--muted-foreground)' }}>
+   438→                            {reply.isAdmin ? '🛡️ Admin' : selectedTicket.userName}
+   439→                          </p>
+   440→                          <p className="text-[10px] text-muted-foreground">{formatTimeAgo(reply.createdAt)}</p>
+   441→                        </div>
+   442→                        <p className="text-xs text-foreground leading-relaxed">{reply.message}</p>
+   443→                      </div>
+   444→                    ))}
+   445→                  </div>
+   446→                </div>
+   447→              )}
+   448→
+   449→              {/* Reply Section */}
+   450→              {selectedTicket.status !== 'CLOSED' && (
+   451→                <>
+   452→                  <Separator />
+   453→                  <div className="space-y-3">
+   454→                    <Label className="text-xs text-muted-foreground">Reply</Label>
+   455→                    <textarea
+   456→                      rows={3}
+   457→                      className="w-full rounded-lg border border-border bg-transparent px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-[#00D09C]/20 focus:border-[#00D09C] resize-none"
+   458→                      placeholder="Type your reply..."
+   459→                      value={replyText}
+   460→                      onChange={(e) => setReplyText(e.target.value)}
+   461→                    />
+   462→                  </div>
+   463→                </>
+   464→              )}
+   465→
+   466→              {/* Actions Footer */}
+   467→              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+   468→                <div className="flex items-center gap-2">
+   469→                  <Label className="text-xs text-muted-foreground">Status:</Label>
+   470→                  <Select
+   471→                    value={selectedTicket.status}
+   472→                    onValueChange={handleStatusChange}
+   473→                    disabled={changingStatus}
+   474→                  >
+   475→                    <SelectTrigger className="w-36 h-8 text-xs border-border">
+   476→                      <SelectValue />
+   477→                    </SelectTrigger>
+   478→                    <SelectContent>
+   479→                      <SelectItem value="OPEN">Open</SelectItem>
+   480→                      <SelectItem value="IN_PROGRESS">In Progress</SelectItem>
+   481→                      <SelectItem value="RESOLVED">Resolved</SelectItem>
+   482→                      <SelectItem value="CLOSED">Closed</SelectItem>
+   483→                    </SelectContent>
+   484→                  </Select>
+   485→                </div>
+   486→                <div className="flex items-center gap-2">
+   487→                  {selectedTicket.status !== 'CLOSED' && (
+   488→                    <Button
+   489→                      variant="outline"
+   490→                      size="sm"
+   491→                      className="border-border text-xs text-muted-foreground hover:text-[#d44a2d] hover:border-[#d44a2d]/30 gap-1.5"
+   492→                      onClick={handleCloseTicket}
+   493→                    >
+   494→                      <XCircle className="size-3.5" />
+   495→                      Close Ticket
+   496→                    </Button>
+   497→                  )}
+   498→                  {selectedTicket.status !== 'CLOSED' && (
+   499→                    <Button
+   500→                      size="sm"
+   501→                      className="bg-[#00D09C] hover:bg-[#00b888] text-white text-xs gap-1.5"
+   502→                      onClick={handleSendReply}
+   503→                      disabled={sendingReply || !replyText.trim()}
+   504→                    >
+   505→                      {sendingReply ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}
+   506→                      Send Reply
+   507→                    </Button>
+   508→                  )}
+   509→                </div>
+   510→              </div>
+   511→            </>
+   512→          )}
+   513→        </DialogContent>
+   514→      </Dialog>
+   515→    </div>
+   516→  )
+   517→}
+   518→
+   519→function TicketsPage() {
+   520→  return (
+   521→    <AdminErrorBoundary fallback="Failed to load tickets">
+   522→      <TicketsPageInner />
+   523→    </AdminErrorBoundary>
+   524→  )
+   525→}
+   526→
+   527→export default TicketsPage

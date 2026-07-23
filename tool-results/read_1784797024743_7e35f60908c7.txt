@@ -1,0 +1,1544 @@
+     1→'use client'
+     2→
+     3→import { useState, useEffect, useCallback, useMemo, useRef, memo } from 'react'
+     4→import { Button } from '@/components/ui/button'
+     5→import { Badge } from '@/components/ui/badge'
+     6→import { Skeleton } from '@/components/ui/skeleton'
+     7→import { Input } from '@/components/ui/input'
+     8→import {
+     9→  Sheet,
+    10→  SheetContent,
+    11→  SheetHeader,
+    12→  SheetTitle,
+    13→  SheetDescription,
+    14→} from '@/components/ui/sheet'
+    15→import {
+    16→  ArrowUpRight,
+    17→  ArrowDownRight,
+    18→  Loader2,
+    19→  TrendingUp,
+    20→  Clock,
+    21→  Zap,
+    22→  ChevronRight,
+    23→  X,
+    24→  Eye,
+    25→  IndianRupee,
+    26→  Layers,
+    27→  BarChart3,
+    28→  Calendar,
+    29→  Hash,
+    30→  Tag,
+    31→  Activity,
+    32→  Briefcase,
+    33→  LineChart,
+    34→} from 'lucide-react'
+    35→import { useAuthStore } from '@/lib/auth-store'
+    36→import { useAppStore } from '@/lib/store'
+    37→import { toast } from 'sonner'
+    38→import { formatINR, formatINRWhole, formatPrice, formatPnL, formatPercent } from '@/lib/format'
+    39→import { useStockData } from '@/hooks/use-market-data'
+    40→import { wsClient } from '@/lib/ws-client'
+    41→import dynamic from 'next/dynamic'
+    42→const StrikeOverviewDrawer = dynamic(
+    43→  () => import('@/components/pepertect/ui/strike-overview-drawer').then(m => ({ default: m.StrikeOverviewDrawer })),
+    44→  { ssr: false }
+    45→)
+    46→
+    47→// ─── Types ───────────────────────────────────────────────────────
+    48→
+    49→interface PositionData {
+    50→  id: string
+    51→  segment: string
+    52→  productType: string
+    53→  tradeDirection: string
+    54→  symbol: string
+    55→  optionType?: string | null
+    56→  strikePrice?: number | null
+    57→  expiryDate?: string | null
+    58→  quantity: number
+    59→  entryPrice: number
+    60→  currentPrice: number
+    61→  totalInvested: number
+    62→  currentValue: number
+    63→  unrealizedPnl: number
+    64→  unrealizedPnlPercent: number
+    65→  realizedPnl?: number | null
+    66→  exitPrice?: number | null
+    67→  exitReason?: string | null
+    68→  closedAt?: string | null
+    69→  marginUsed: number
+    70→  lots: number
+    71→  lotSize: number
+    72→  isOpen: boolean
+    73→  createdAt: string
+    74→  stopLoss?: number | null
+    75→  target?: number | null
+    76→}
+    77→
+    78→// Helper to determine if a position is a Stock (EQUITY) or Index (FUTURES/OPTIONS)
+    79→function isStockPosition(pos: PositionData): boolean {
+    80→  return pos.segment === 'EQUITY'
+    81→}
+    82→
+    83→function isIndexPosition(pos: PositionData): boolean {
+    84→  return pos.segment === 'FUTURES' || pos.segment === 'OPTIONS'
+    85→}
+    86→
+    87→function formatDuration(startIso: string, endIso?: string | null): string {
+    88→  const start = new Date(startIso).getTime()
+    89→  const end = endIso ? new Date(endIso).getTime() : Date.now()
+    90→  const diffMs = end - start
+    91→  const diffMin = Math.floor(diffMs / 60000)
+    92→  if (diffMin < 1) return '< 1m'
+    93→  if (diffMin < 60) return `${diffMin}m`
+    94→  const diffHr = Math.floor(diffMin / 60)
+    95→  const remMin = diffMin % 60
+    96→  if (diffHr < 24) return `${diffHr}h ${remMin}m`
+    97→  const diffDay = Math.floor(diffHr / 24)
+    98→  const remHr = diffHr % 24
+    99→  return `${diffDay}d ${remHr}h`
+   100→}
+   101→
+   102→function formatDate(iso: string): string {
+   103→  return new Date(iso).toLocaleDateString('en-IN', {
+   104→    day: '2-digit',
+   105→    month: 'short',
+   106→    year: 'numeric',
+   107→    hour: '2-digit',
+   108→    minute: '2-digit',
+   109→  })
+   110→}
+   111→
+   112→// ─── Groww-Style Live Price Cell ────────────────────────────────
+   113→
+   114→const LivePriceCell = memo(function LivePriceCell({
+   115→  price,
+   116→  prevPrice,
+   117→}: {
+   118→  price: number
+   119→  prevPrice: number | undefined
+   120→}) {
+   121→  const direction = prevPrice !== undefined && price !== prevPrice
+   122→    ? (price > prevPrice ? 'up' : 'down')
+   123→    : null
+   124→
+   125→  return (
+   126→    <span className={`font-mono-data font-tabular text-[15px] font-semibold inline-block px-1.5 py-0.5 rounded ${
+   127→      direction === 'up' ? 'animate-flash-green text-[#00B386]' : direction === 'down' ? 'animate-flash-red text-[#EB5B3C]' : 'text-foreground'
+   128→    }`}>
+   129→      {formatPrice(price)}
+   130→    </span>
+   131→  )
+   132→})
+   133→
+   134→// ─── Groww-Style P&L Cell with BIG FILL ────────────────────────
+   135→
+   136→const PnLFillCell = memo(function PnLFillCell({
+   137→  pnl,
+   138→  pnlPercent,
+   139→  prevPnl,
+   140→}: {
+   141→  pnl: number
+   142→  pnlPercent: number
+   143→  prevPnl: number | undefined
+   144→}) {
+   145→  const isPositive = pnl >= 0
+   146→  const shouldFlash = prevPnl !== undefined && pnl !== prevPnl
+   147→  const absPnl = Math.abs(pnl)
+   148→
+   149→  return (
+   150→    <div className={`flex flex-col items-end px-3 py-2 rounded-xl ${
+   151→      shouldFlash ? 'animate-pnl-flash' : ''
+   152→    } ${
+   153→      isPositive
+   154→        ? 'bg-[#00B386]/12 border border-[#00B386]/20'
+   155→        : 'bg-[#EB5B3C]/10 border border-[#EB5B3C]/18'
+   156→    }`}>
+   157→      <span className={`font-mono-data font-tabular text-[15px] font-bold ${
+   158→        isPositive ? 'text-[#009e76]' : 'text-[#d44a2d]'
+   159→      }`}>
+   160→        {formatPnL(isPositive ? absPnl : -absPnl)}
+   161→      </span>
+   162→      <span className={`font-mono-data font-tabular text-[11px] font-semibold mt-0.5 ${
+   163→        isPositive ? 'text-[#009e76]/80' : 'text-[#d44a2d]/80'
+   164→      }`}>
+   165→        {formatPercent(pnlPercent)}
+   166→      </span>
+   167→    </div>
+   168→  )
+   169→})
+   170→
+   171→// ─── Groww-Style Open Position Card ─────────────────────────────
+   172→
+   173→const OpenPositionCard = memo(function OpenPositionCard({
+   174→  pos,
+   175→  livePrice,
+   176→  prevPrice,
+   177→  prevPnl,
+   178→  isLive,
+   179→  onSquareOff,
+   180→  isSquaringOff,
+   181→  onViewDetails,
+   182→  onViewStrikeChart,
+   183→}: {
+   184→  pos: PositionData
+   185→  livePrice: number
+   186→  prevPrice: number | undefined
+   187→  prevPnl: number | undefined
+   188→  isLive: boolean
+   189→  onSquareOff: (id: string, symbol: string) => void
+   190→  isSquaringOff: boolean
+   191→  onViewDetails: (pos: PositionData) => void
+   192→  onViewStrikeChart?: (pos: PositionData) => void
+   193→}) {
+   194→  const isLong = pos.tradeDirection === 'BUY'
+   195→
+   196→  // Calculate live P&L
+   197→  const livePnl = isLong
+   198→    ? (livePrice - pos.entryPrice) * pos.quantity
+   199→    : (pos.entryPrice - livePrice) * pos.quantity
+   200→  const livePnlPercent = pos.totalInvested > 0
+   201→    ? (livePnl / pos.totalInvested) * 100
+   202→    : 0
+   203→
+   204→  const isProfit = livePnl >= 0
+   205→
+   206→  return (
+   207→    <div className="bg-card rounded-2xl border border-border overflow-hidden transition-shadow hover:shadow-md">
+   208→      {/* Top section: Symbol + P&L fill */}
+   209→      <div className="flex items-start justify-between p-4 pb-3">
+   210→        <div className="flex-1 min-w-0">
+   211→          <div className="flex items-center gap-2 mb-1">
+   212→            {pos.segment === 'OPTIONS' && onViewStrikeChart ? (
+   213→              <button
+   214→                className="font-bold text-[15px] text-foreground truncate hover:text-[#00D09C] transition-colors text-left"
+   215→                onClick={() => onViewStrikeChart(pos)}
+   216→              >
+   217→                {pos.symbol}
+   218→              </button>
+   219→            ) : (
+   220→              <span className="font-bold text-[15px] text-foreground truncate">{pos.symbol}</span>
+   221→            )}
+   222→            <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[9px] font-bold uppercase shrink-0 ${
+   223→              isLong
+   224→                ? 'bg-[#00B386]/10 text-[#00B386]'
+   225→                : 'bg-[#EB5B3C]/10 text-[#EB5B3C]'
+   226→            }`}>
+   227→              {isLong ? <ArrowUpRight className="size-2.5" /> : <ArrowDownRight className="size-2.5" />}
+   228→              {isLong ? 'BUY' : 'SELL'}
+   229→            </span>
+   230→            {isLive && (
+   231→              <span className="flex items-center gap-0.5 text-[8px] font-bold text-[#00B386] bg-[#00B386]/8 px-1.5 py-0.5 rounded-full uppercase tracking-wider shrink-0">
+   232→                <Zap className="size-2" />
+   233→                LIVE
+   234→              </span>
+   235→            )}
+   236→            {pos.stopLoss && pos.stopLoss > 0 && (
+   237→              <span className="text-[8px] font-bold text-[#EB5B3C] bg-[#EB5B3C]/10 px-1.5 py-0.5 rounded-full shrink-0">SL</span>
+   238→            )}
+   239→            {pos.target && pos.target > 0 && (
+   240→              <span className="text-[8px] font-bold text-[#00B386] bg-[#00B386]/10 px-1.5 py-0.5 rounded-full shrink-0">TGT</span>
+   241→            )}
+   242→          </div>
+   243→          <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+   244→            {pos.segment === 'OPTIONS' && pos.strikePrice && (
+   245→              <button
+   246→                className="text-[#00D09C] font-semibold hover:underline"
+   247→                onClick={() => onViewStrikeChart?.(pos)}
+   248→              >
+   249→                {pos.strikePrice} {pos.optionType}
+   250→              </button>
+   251→            )}
+   252→            {pos.segment === 'FUTURES' && <span>FUT</span>}
+   253→            <span>·</span>
+   254→            <span>Qty: {pos.quantity}</span>
+   255→            <span>·</span>
+   256→            <span>{pos.segment}</span>
+   257→          </div>
+   258→        </div>
+   259→
+   260→        {/* BIG P&L fill */}
+   261→        <div className="shrink-0 ml-3">
+   262→          <PnLFillCell
+   263→            pnl={Math.round(livePnl * 100) / 100}
+   264→            pnlPercent={Math.round(livePnlPercent * 100) / 100}
+   265→            prevPnl={prevPnl}
+   266→          />
+   267→        </div>
+   268→      </div>
+   269→
+   270→      {/* Bottom section: Price info + View Details + Exit */}
+   271→      <div className={`flex items-center justify-between px-4 py-2.5 border-t ${
+   272→        isProfit ? 'bg-[#00B386]/[0.03] border-[#00B386]/10' : 'bg-[#EB5B3C]/[0.03] border-[#EB5B3C]/10'
+   273→      }`}>
+   274→        <div className="flex items-center gap-3 text-[12px]">
+   275→          <div className="flex flex-col">
+   276→            <span className="text-muted-foreground text-[10px] font-medium">Entry</span>
+   277→            <span className="font-mono-data font-tabular text-foreground font-medium">{formatPrice(pos.entryPrice)}</span>
+   278→          </div>
+   279→          <ChevronRight className="size-3 text-muted-foreground" />
+   280→          <div className="flex flex-col">
+   281→            <span className="text-muted-foreground text-[10px] font-medium">LTP</span>
+   282→            <LivePriceCell price={livePrice} prevPrice={prevPrice} />
+   283→          </div>
+   284→          {pos.stopLoss && pos.stopLoss > 0 && (
+   285→            <>
+   286→              <ChevronRight className="size-3 text-muted-foreground" />
+   287→              <div className="flex flex-col">
+   288→                <span className="text-[#EB5B3C] text-[10px] font-medium">SL</span>
+   289→                <span className="font-mono-data font-tabular text-[#EB5B3C] font-medium">{formatPrice(pos.stopLoss)}</span>
+   290→              </div>
+   291→            </>
+   292→          )}
+   293→          {pos.target && pos.target > 0 && (
+   294→            <>
+   295→              <ChevronRight className="size-3 text-muted-foreground" />
+   296→              <div className="flex flex-col">
+   297→                <span className="text-[#00B386] text-[10px] font-medium">TGT</span>
+   298→                <span className="font-mono-data font-tabular text-[#00B386] font-medium">{formatPrice(pos.target)}</span>
+   299→              </div>
+   300→            </>
+   301→          )}
+   302→        </div>
+   303→
+   304→        <div className="flex items-center gap-2">
+   305→          {/* View Details button */}
+   306→          <Button
+   307→            variant="outline"
+   308→            size="sm"
+   309→            className="rounded-lg px-3 py-1.5 text-[11px] font-semibold active:scale-95 transition-all border-[#00D09C]/30 text-[#00D09C] bg-transparent hover:bg-[#00D09C] hover:text-white hover:border-[#00D09C]"
+   310→            onClick={() => onViewDetails(pos)}
+   311→          >
+   312→            <Eye className="size-3 mr-1" />
+   313→            View Details
+   314→          </Button>
+   315→
+   316→          {/* Exit button */}
+   317→          <Button
+   318→            variant="outline"
+   319→            size="sm"
+   320→            className={`rounded-lg px-3 py-1.5 text-[11px] font-semibold active:scale-95 transition-all shrink-0 ${
+   321→              isSquaringOff
+   322→                ? 'border-muted-foreground text-muted-foreground'
+   323→                : 'border-[#EB5B3C]/30 text-[#EB5B3C] bg-transparent hover:bg-[#EB5B3C] hover:text-white hover:border-[#EB5B3C]'
+   324→            }`}
+   325→            disabled={isSquaringOff}
+   326→            onClick={() => onSquareOff(pos.id, pos.symbol)}
+   327→          >
+   328→            {isSquaringOff ? (
+   329→              <Loader2 className="size-3.5 animate-spin" />
+   330→            ) : (
+   331→              <X className="size-3 mr-1" />
+   332→            )}
+   333→            {isSquaringOff ? '' : 'Exit'}
+   334→          </Button>
+   335→        </div>
+   336→      </div>
+   337→    </div>
+   338→  )
+   339→})
+   340→
+   341→// ─── Groww-Style Closed Position Card ──────────────────────────
+   342→
+   343→const ClosedPositionCard = memo(function ClosedPositionCard({
+   344→  pos,
+   345→  onViewDetails,
+   346→}: {
+   347→  pos: PositionData
+   348→  onViewDetails: (pos: PositionData) => void
+   349→}) {
+   350→  const isLong = pos.tradeDirection === 'BUY'
+   351→  const isPositive = (pos.realizedPnl ?? 0) >= 0
+   352→  const realizedPnl = pos.realizedPnl ?? 0
+   353→
+   354→  return (
+   355→    <div className="bg-card rounded-2xl border border-border overflow-hidden transition-shadow hover:shadow-sm">
+   356→      <div className="flex items-start justify-between p-4 pb-3">
+   357→        <div className="flex-1 min-w-0">
+   358→          <div className="flex items-center gap-2 mb-1">
+   359→            <span className="font-bold text-[15px] text-foreground truncate">{pos.symbol}</span>
+   360→            <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[9px] font-bold uppercase shrink-0 ${
+   361→              isLong
+   362→                ? 'bg-[#00B386]/10 text-[#00B386]'
+   363→                : 'bg-[#EB5B3C]/10 text-[#EB5B3C]'
+   364→            }`}>
+   365→              {isLong ? <ArrowUpRight className="size-2.5" /> : <ArrowDownRight className="size-2.5" />}
+   366→              {isLong ? 'BUY' : 'SELL'}
+   367→            </span>
+   368→            <Badge variant="secondary" className="text-[9px] px-1.5 py-0 bg-muted-foreground/10 text-muted-foreground font-semibold uppercase shrink-0">
+   369→              Closed
+   370→            </Badge>
+   371→            {pos.exitReason && (
+   372→              <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${
+   373→                pos.exitReason === 'TARGET'
+   374→                  ? 'bg-[#00B386]/10 text-[#00B386]'
+   375→                  : 'bg-[#EB5B3C]/10 text-[#EB5B3C]'
+   376→              }`}>
+   377→                {pos.exitReason === 'TARGET' ? 'Target Hit' : 'SL Hit'}
+   378→              </span>
+   379→            )}
+   380→          </div>
+   381→          <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+   382→            {pos.segment === 'OPTIONS' && pos.strikePrice && (
+   383→              <span>{pos.strikePrice} {pos.optionType}</span>
+   384→            )}
+   385→            {pos.segment === 'FUTURES' && <span>FUT</span>}
+   386→            <span>·</span>
+   387→            <span>Qty: {pos.quantity}</span>
+   388→          </div>
+   389→        </div>
+   390→
+   391→        {/* Closed P&L fill */}
+   392→        <div className={`flex flex-col items-end px-3 py-2 rounded-xl shrink-0 ml-3 ${
+   393→          isPositive
+   394→            ? 'bg-[#00B386]/12 border border-[#00B386]/20'
+   395→            : 'bg-[#EB5B3C]/10 border border-[#EB5B3C]/18'
+   396→        }`}>
+   397→          <span className={`font-mono-data font-tabular text-[15px] font-bold ${
+   398→            isPositive ? 'text-[#009e76]' : 'text-[#d44a2d]'
+   399→          }`}>
+   400→            {formatPnL(isPositive ? realizedPnl : -realizedPnl)}
+   401→          </span>
+   402→          <span className={`font-mono-data font-tabular text-[11px] font-semibold mt-0.5 ${
+   403→            isPositive ? 'text-[#009e76]/80' : 'text-[#d44a2d]/80'
+   404→          }`}>
+   405→            Realized P&L
+   406→          </span>
+   407→        </div>
+   408→      </div>
+   409→
+   410→      <div className={`flex items-center justify-between px-4 py-2.5 border-t ${
+   411→        isPositive ? 'bg-[#00B386]/[0.03] border-[#00B386]/10' : 'bg-[#EB5B3C]/[0.03] border-[#EB5B3C]/10'
+   412→      }`}>
+   413→        <div className="flex items-center gap-3 text-[12px]">
+   414→          <div className="flex flex-col">
+   415→            <span className="text-muted-foreground text-[10px] font-medium">Entry</span>
+   416→            <span className="font-mono-data font-tabular text-foreground font-medium">{formatPrice(pos.entryPrice)}</span>
+   417→          </div>
+   418→          <ChevronRight className="size-3 text-muted-foreground" />
+   419→          <div className="flex flex-col">
+   420→            <span className="text-muted-foreground text-[10px] font-medium">Exit</span>
+   421→            <span className="font-mono-data font-tabular text-foreground font-medium">{pos.exitPrice ? formatPrice(pos.exitPrice) : '—'}</span>
+   422→          </div>
+   423→          <div className="flex items-center gap-1 text-[11px] text-muted-foreground ml-2">
+   424→            <Clock className="size-3" />
+   425→            {formatDuration(pos.createdAt, pos.closedAt)}
+   426→          </div>
+   427→        </div>
+   428→
+   429→        {/* View Details button */}
+   430→        <Button
+   431→          variant="outline"
+   432→          size="sm"
+   433→          className="rounded-lg px-3 py-1.5 text-[11px] font-semibold active:scale-95 transition-all border-[#00D09C]/30 text-[#00D09C] bg-transparent hover:bg-[#00D09C] hover:text-white hover:border-[#00D09C]"
+   434→          onClick={() => onViewDetails(pos)}
+   435→        >
+   436→          <Eye className="size-3 mr-1" />
+   437→          View Details
+   438→        </Button>
+   439→      </div>
+   440→    </div>
+   441→  )
+   442→})
+   443→
+   444→// ─── Groww-Style Total P&L Banner (only P&L, no investment) ────
+   445→
+   446→const TotalPnLBanner = memo(function TotalPnLBanner({
+   447→  totalPnl,
+   448→  openCount,
+   449→  isLive,
+   450→}: {
+   451→  totalPnl: number
+   452→  openCount: number
+   453→  isLive: boolean
+   454→}) {
+   455→  const isProfit = totalPnl >= 0
+   456→
+   457→  return (
+   458→    <div className={`rounded-2xl p-5 border ${
+   459→      isProfit
+   460→        ? 'bg-gradient-to-br from-[#00B386]/10 via-[#00B386]/5 to-transparent border-[#00B386]/20'
+   461→        : 'bg-gradient-to-br from-[#EB5B3C]/10 via-[#EB5B3C]/5 to-transparent border-[#EB5B3C]/20'
+   462→    }`}>
+   463→      <div className="flex items-center justify-between">
+   464→        <div>
+   465→          <div className="flex items-center gap-2 mb-1">
+   466→            <span className="text-[12px] font-semibold text-muted-foreground uppercase tracking-wider">Total P&L</span>
+   467→            {isLive && (
+   468→              <span className="flex items-center gap-1 text-[9px] font-bold text-[#00B386] bg-[#00B386]/10 px-1.5 py-0.5 rounded-full uppercase tracking-wider">
+   469→                <span className="size-1.5 rounded-full bg-[#00B386] animate-pulse" />
+   470→                LIVE
+   471→              </span>
+   472→            )}
+   473→          </div>
+   474→          <div className="flex items-baseline gap-2">
+   475→            <span className={`font-mono-data font-tabular text-[28px] font-bold tracking-tight ${
+   476→              isProfit ? 'text-[#009e76]' : 'text-[#d44a2d]'
+   477→            }`}>
+   478→              {formatPnL(isProfit ? totalPnl : -totalPnl)}
+   479→            </span>
+   480→          </div>
+   481→        </div>
+   482→        <div className="text-right">
+   483→          <div className="text-[11px] text-muted-foreground mt-1">
+   484→            {openCount} {openCount === 1 ? 'position' : 'positions'} open
+   485→          </div>
+   486→        </div>
+   487→      </div>
+   488→    </div>
+   489→  )
+   490→})
+   491→
+   492→// ─── Detail Sheet Row ───────────────────────────────────────────
+   493→
+   494→function DetailRow({ icon: Icon, label, value, valueClass }: {
+   495→  icon: React.ElementType
+   496→  label: string
+   497→  value: string
+   498→  valueClass?: string
+   499→}) {
+   500→  return (
+   501→    <div className="flex items-center justify-between py-3 border-b border-muted last:border-b-0">
+   502→      <div className="flex items-center gap-2.5">
+   503→        <div className="size-7 rounded-lg bg-background flex items-center justify-center">
+   504→          <Icon className="size-3.5 text-muted-foreground" />
+   505→        </div>
+   506→        <span className="text-[13px] text-muted-foreground font-medium">{label}</span>
+   507→      </div>
+   508→      <span className={`font-mono-data font-tabular text-[13px] font-semibold ${valueClass || 'text-foreground'}`}>
+   509→        {value}
+   510→      </span>
+   511→    </div>
+   512→  )
+   513→}
+   514→
+   515→// ─── SL / Target Editor ────────────────────────────────────────
+   516→
+   517→function SLEditor({ position, onUpdated }: { position: PositionData; onUpdated?: (pos: Partial<PositionData>) => void }) {
+   518→  const token = useAuthStore(s => s.token)
+   519→  const [sl, setSl] = useState(position.stopLoss ? String(position.stopLoss) : '')
+   520→  const [tgt, setTgt] = useState(position.target ? String(position.target) : '')
+   521→  const [saving, setSaving] = useState(false)
+   522→
+   523→  const handleSave = async () => {
+   524→    if (!token || (!sl && !tgt)) return
+   525→    setSaving(true)
+   526→    try {
+   527→      const body: Record<string, unknown> = { positionId: position.id, stopLoss: null, target: null }
+   528→      if (sl) body.stopLoss = parseFloat(sl)
+   529→      if (tgt) body.target = parseFloat(tgt)
+   530→      const res = await fetch('/api/trade/sl-set', {
+   531→        method: 'POST',
+   532→        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+   533→        body: JSON.stringify(body),
+   534→      })
+   535→      const data = await res.json()
+   536→      if (res.ok && data.success) {
+   537→        toast.success(`SL/Target updated for ${position.symbol}`)
+   538→        onUpdated?.({
+   539→          stopLoss: sl ? parseFloat(sl) : null,
+   540→          target: tgt ? parseFloat(tgt) : null,
+   541→        })
+   542→      } else {
+   543→        toast.error(data.error || 'Failed to update SL/Target')
+   544→      }
+   545→    } catch {
+   546→      toast.error('Network error')
+   547→    } finally {
+   548→      setSaving(false)
+   549→    }
+   550→  }
+   551→
+   552→  const handleRemove = async () => {
+   553→    if (!token) return
+   554→    setSaving(true)
+   555→    try {
+   556→      const res = await fetch('/api/trade/sl-set', {
+   557→        method: 'DELETE',
+   558→        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+   559→        body: JSON.stringify({ positionId: position.id }),
+   560→      })
+   561→      if (res.ok) {
+   562→        setSl('')
+   563→        setTgt('')
+   564→        toast.success('SL/Target removed')
+   565→        onUpdated?.({ stopLoss: null, target: null })
+   566→      }
+   567→    } catch {
+   568→      toast.error('Failed to remove')
+   569→    } finally {
+   570→      setSaving(false)
+   571→    }
+   572→  }
+   573→
+   574→  const hasSL = position.stopLoss && position.stopLoss > 0
+   575→  const hasTarget = position.target && position.target > 0
+   576→  const entry = position.entryPrice
+   577→  const isBuy = position.tradeDirection === 'BUY'
+   578→
+   579→  return (
+   580→    <div className="mt-3 pt-3 border-t border-border space-y-2.5">
+   581→      <div className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Stop Loss / Target</div>
+   582→
+   583→      <div className="grid grid-cols-2 gap-2">
+   584→        <div className="space-y-1">
+   585→          <label className="text-[10px] font-bold text-[#EB5B3C] uppercase tracking-wider">Stop Loss</label>
+   586→          <Input
+   587→            type="number"
+   588→            value={sl}
+   589→            onChange={e => setSl(e.target.value)}
+   590→            className="h-9 font-mono text-xs border-border bg-card focus:ring-[#EB5B3C]/20 focus:border-[#EB5B3C]"
+   591→            placeholder={isBuy ? `Below ${entry}` : `Above ${entry}`}
+   592→          />
+   593→        </div>
+   594→        <div className="space-y-1">
+   595→          <label className="text-[10px] font-bold text-[#00B386] uppercase tracking-wider">Target</label>
+   596→          <Input
+   597→            type="number"
+   598→            value={tgt}
+   599→            onChange={e => setTgt(e.target.value)}
+   600→            className="h-9 font-mono text-xs border-border bg-card focus:ring-[#00B386]/20 focus:border-[#00B386]"
+   601→            placeholder={isBuy ? `Above ${entry}` : `Below ${entry}`}
+   602→          />
+   603→        </div>
+   604→      </div>
+   605→
+   606→      <div className="flex gap-2">
+   607→        <button
+   608→          onClick={handleSave}
+   609→          disabled={saving || (!sl && !tgt)}
+   610→          className="flex-1 h-9 rounded-lg text-[11px] font-bold bg-[#00D09C] hover:bg-[#00b386] text-white disabled:opacity-40 disabled:cursor-not-allowed transition-all active:scale-[0.98]"
+   611→        >
+   612→          {saving ? 'Saving...' : 'Update'}
+   613→        </button>
+   614→        {(hasSL || hasTarget) && (
+   615→          <button
+   616→            onClick={handleRemove}
+   617→            disabled={saving}
+   618→            className="h-9 px-3 rounded-lg text-[11px] font-bold bg-background hover:bg-muted text-muted-foreground disabled:opacity-40 transition-all"
+   619→          >
+   620→            Remove
+   621→          </button>
+   622→        )}
+   623→      </div>
+   624→
+   625→      {(hasSL || hasTarget) && (
+   626→        <div className="flex gap-3 text-[10px] text-muted-foreground">
+   627→          {hasSL && <span>SL: <b className="text-[#EB5B3C]">₹{position.stopLoss}</b></span>}
+   628→          {hasTarget && <span>Target: <b className="text-[#00B386]">₹{position.target}</b></span>}
+   629→        </div>
+   630→      )}
+   631→    </div>
+   632→  )
+   633→}
+   634→
+   635→// ─── Position Detail Sheet ──────────────────────────────────────
+   636→
+   637→function PositionDetailSheet({
+   638→  position,
+   639→  livePrice,
+   640→  open,
+   641→  onOpenChange,
+   642→  onSquareOff,
+   643→  isSquaringOff,
+   644→}: {
+   645→  position: PositionData | null
+   646→  livePrice: number | undefined
+   647→  open: boolean
+   648→  onOpenChange: (open: boolean) => void
+   649→  onSquareOff: (id: string, symbol: string) => void
+   650→  isSquaringOff: boolean
+   651→}) {
+   652→  if (!position) return null
+   653→
+   654→  const isLong = position.tradeDirection === 'BUY'
+   655→  const isProfit = position.isOpen !== false
+   656→    ? isLong
+   657→      ? (livePrice ?? position.currentPrice) > position.entryPrice
+   658→      : position.entryPrice > (livePrice ?? position.currentPrice)
+   659→    : (position.realizedPnl ?? 0) >= 0
+   660→
+   661→  const currentPrice = livePrice ?? position.currentPrice
+   662→  const livePnl = isLong
+   663→    ? (currentPrice - position.entryPrice) * position.quantity
+   664→    : (position.entryPrice - currentPrice) * position.quantity
+   665→  const livePnlPercent = position.totalInvested > 0
+   666→    ? (livePnl / position.totalInvested) * 100
+   667→    : 0
+   668→
+   669→  const isPositionOpen = position.isOpen !== false
+   670→
+   671→  return (
+   672→    <Sheet open={open} onOpenChange={onOpenChange}>
+   673→      <SheetContent side="bottom" className="rounded-t-3xl max-h-[85vh] overflow-y-auto">
+   674→        <SheetHeader className="pb-2">
+   675→          <div className="flex items-center gap-2">
+   676→            <SheetTitle className="text-[18px] font-bold text-foreground">
+   677→              {position.symbol}
+   678→            </SheetTitle>
+   679→            <span className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase ${
+   680→              isLong
+   681→                ? 'bg-[#00B386]/10 text-[#00B386]'
+   682→                : 'bg-[#EB5B3C]/10 text-[#EB5B3C]'
+   683→            }`}>
+   684→              {isLong ? <ArrowUpRight className="size-3" /> : <ArrowDownRight className="size-3" />}
+   685→              {isLong ? 'BUY' : 'SELL'}
+   686→            </span>
+   687→            {!isPositionOpen && (
+   688→              <Badge variant="secondary" className="text-[9px] px-2 py-0 bg-muted-foreground/10 text-muted-foreground font-semibold uppercase">
+   689→                Closed
+   690→              </Badge>
+   691→            )}
+   692→          </div>
+   693→          <SheetDescription className="sr-only">
+   694→            Trade details for {position.symbol}
+   695→          </SheetDescription>
+   696→        </SheetHeader>
+   697→
+   698→        {/* P&L Hero */}
+   699→        <div className={`rounded-2xl p-4 mb-4 border ${
+   700→          isProfit
+   701→            ? 'bg-gradient-to-br from-[#00B386]/10 via-[#00B386]/5 to-transparent border-[#00B386]/20'
+   702→            : 'bg-gradient-to-br from-[#EB5B3C]/10 via-[#EB5B3C]/5 to-transparent border-[#EB5B3C]/20'
+   703→        }`}>
+   704→          <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">
+   705→            {isPositionOpen ? 'Unrealized P&L' : 'Realized P&L'}
+   706→          </div>
+   707→          <div className="flex items-baseline gap-2">
+   708→            <span className={`font-mono-data font-tabular text-[26px] font-bold ${
+   709→              isProfit ? 'text-[#009e76]' : 'text-[#d44a2d]'
+   710→            }`}>
+   711→              {isPositionOpen
+   712→                ? formatPnL(livePnl)
+   713→                : formatPnL(position.realizedPnl ?? 0)
+   714→              }
+   715→            </span>
+   716→            {isPositionOpen && (
+   717→              <span className={`font-mono-data font-tabular text-[13px] font-semibold ${
+   718→                isProfit ? 'text-[#009e76]/70' : 'text-[#d44a2d]/70'
+   719→              }`}>
+   720→                {formatPercent(livePnlPercent)}
+   721→              </span>
+   722→            )}
+   723→          </div>
+   724→        </div>
+   725→
+   726→        {/* All Trade Details */}
+   727→        <div className="px-1">
+   728→          <DetailRow icon={Tag} label="Symbol" value={position.symbol} />
+   729→          <DetailRow icon={Activity} label="Trade Type" value={isLong ? 'BUY (Long)' : 'SELL (Short)'} valueClass={isLong ? 'text-[#00B386]' : 'text-[#EB5B3C]'} />
+   730→          <DetailRow icon={Layers} label="Segment" value={position.segment} />
+   731→
+   732→          {position.segment === 'OPTIONS' && position.strikePrice && (
+   733→            <DetailRow icon={Hash} label="Strike / Option" value={`${position.strikePrice} ${position.optionType || ''}`} />
+   734→          )}
+   735→
+   736→          {position.segment === 'FUTURES' && (
+   737→            <DetailRow icon={Layers} label="Lot Size" value={`${position.lotSize} × ${position.lots} lots`} />
+   738→          )}
+   739→
+   740→          {position.expiryDate && (
+   741→            <DetailRow icon={Calendar} label="Expiry" value={formatDate(position.expiryDate)} />
+   742→          )}
+   743→
+   744→          <DetailRow icon={Hash} label="Quantity" value={String(position.quantity)} />
+   745→          <DetailRow icon={IndianRupee} label="Entry Price" value={formatINR(position.entryPrice)} />
+   746→
+   747→          {isPositionOpen ? (
+   748→            <DetailRow icon={BarChart3} label="Current LTP" value={formatINR(currentPrice)} />
+   749→          ) : (
+   750→            <DetailRow icon={BarChart3} label="Exit Price" value={position.exitPrice ? formatINR(position.exitPrice) : '—'} />
+   751→          )}
+   752→
+   753→          <DetailRow icon={IndianRupee} label="Total Invested" value={formatINR(position.totalInvested)} />
+   754→          <DetailRow icon={IndianRupee} label="Current Value" value={formatINR(currentPrice * position.quantity)} />
+   755→          <DetailRow icon={IndianRupee} label="Margin Used" value={formatINR(position.marginUsed)} />
+   756→          <DetailRow icon={Calendar} label="Opened At" value={formatDate(position.createdAt)} />
+   757→
+   758→          {!isPositionOpen && position.closedAt && (
+   759→            <DetailRow icon={Clock} label="Closed At" value={formatDate(position.closedAt)} />
+   760→          )}
+   761→
+   762→          {!isPositionOpen && (
+   763→            <DetailRow icon={Clock} label="Duration" value={formatDuration(position.createdAt, position.closedAt)} />
+   764→          )}
+   765→
+   766→          {isPositionOpen && (
+   767→            <DetailRow icon={Clock} label="Holding Duration" value={formatDuration(position.createdAt)} />
+   768→          )}
+   769→        </div>
+   770→
+   771→        {/* SL / Target Edit */}
+   772→        {isPositionOpen && (
+   773→          <SLEditor
+   774→            position={position}
+   775→            onUpdated={(updates) => {
+   776→              setDetailPosition(prev => prev ? { ...prev, ...updates } : null)
+   777→              // Also update the main positions list so SL/Target badges update immediately
+   778→              setPositions(prev => prev.map(p =>
+   779→                p.id === position.id ? { ...p, ...updates } : p
+   780→              ))
+   781→            }}
+   782→          />
+   783→        )}
+   784→
+   785→        {/* Square Off button for open positions */}
+   786→        {isPositionOpen && (
+   787→          <div className="mt-4 pt-4 border-t border-border">
+   788→            <Button
+   789→              className="w-full rounded-xl py-3 text-[14px] font-semibold bg-[#EB5B3C] hover:bg-[#d44a2d] text-white active:scale-[0.98] transition-all"
+   790→              disabled={isSquaringOff}
+   791→              onClick={() => {
+   792→                onSquareOff(position.id, position.symbol)
+   793→                onOpenChange(false)
+   794→              }}
+   795→            >
+   796→              {isSquaringOff ? (
+   797→                <Loader2 className="size-4 animate-spin mr-2" />
+   798→              ) : (
+   799→                <X className="size-4 mr-2" />
+   800→              )}
+   801→              {isSquaringOff ? 'Squaring Off...' : `Square Off ${position.symbol}`}
+   802→            </Button>
+   803→          </div>
+   804→        )}
+   805→      </SheetContent>
+   806→    </Sheet>
+   807→  )
+   808→}
+   809→
+   810→// ─── Segment Sub-Tab ────────────────────────────────────────────
+   811→
+   812→type SegmentTab = 'stocks' | 'index'
+   813→
+   814→// ─── Main Component ─────────────────────────────────────────────
+   815→
+   816→export function PositionsPage() {
+   817→  const { token } = useAuthStore()
+   818→  const tradeSignal = useAppStore(s => s.tradeSignal)
+   819→  const { setCurrentPage, positionsTab, setPositionsTab } = useAppStore()
+   820→  const [positions, setPositions] = useState<PositionData[]>([])
+   821→  const [loading, setLoading] = useState(true)
+   822→  const [squaringOff, setSquaringOff] = useState<string | null>(null)
+   823→  const [activeTab, setActiveTab] = useState<'open' | 'closed'>('open')
+   824→  const segmentTab: SegmentTab = positionsTab
+   825→  const [detailPosition, setDetailPosition] = useState<PositionData | null>(null)
+   826→  const [detailOpen, setDetailOpen] = useState(false)
+   827→
+   828→  // ─── Strike Overview (for OPTIONS positions) ──────────────────
+   829→  const [strikeOverview, setStrikeOverview] = useState<{
+   830→    underlying: string
+   831→    strike: number
+   832→    optionType: 'CE' | 'PE'
+   833→    instrumentKey: string
+   834→    ltp: number
+   835→    greeks: { iv: number; delta: number; theta: number; vega: number; gamma: number; pop: number } | null
+   836→    marketData: { volume: number; oi: number; prev_oi: number; close_price: number; bid_price: number; ask_price: number; bid_qty: number; ask_qty: number } | null
+   837→    spot: number
+   838→  } | null>(null)
+   839→  // Cache OC data (strike → { instrumentKey, greeks, marketData, spot })
+   840→  const ocDataCacheRef = useRef<Map<string, {
+   841→    instrumentKey: string
+   842→    greeks: any
+   843→    marketData: any
+   844→    spot: number
+   845→  }>>(new Map())
+   846→
+   847→  // ─── Real-Time Market Data ──────────────────────────────────
+   848→  const { stocks: wsStockQuotes, status: wsStatus, marketClosed } = useStockData()
+   849→
+   850→  // Market status from poller
+   851→  const marketOpen = !marketClosed
+   852→
+   853→  // ─── Live prices - separate refs for stable rendering ───────
+   854→  const livePricesRef = useRef<Record<string, number>>({})
+   855→  const prevPricesRef = useRef<Record<string, number>>({})
+   856→  const prevPnlRef = useRef<Record<string, number>>({})
+   857→  const [livePrices, setLivePrices] = useState<Record<string, number>>({})
+   858→  const [prevPnlMap, setPrevPnlMap] = useState<Record<string, number>>({})
+   859→
+   860→  // Keep positions in a ref so OC handler always sees latest data
+   861→  const positionsRef = useRef<PositionData[]>([])
+   862→  positionsRef.current = positions
+   863→
+   864→  // Track OC WS cleanup functions by combo key ("NIFTY::2026-07-07")
+   865→  const ocCleanupRef = useRef<Map<string, (() => void)[]>>(new Map())
+   866→
+   867→  // ─── Update EQUITY live prices from WebSocket stock quotes ──────
+   868→  // Only EQUITY segment uses wsStockQuotes. OPTIONS use OC SSE (below),
+   869→  // FUTURES use the server SSE stream.
+   870→  useEffect(() => {
+   871→    if (!marketOpen) return
+   872→    if (wsStatus !== 'connected') return
+   873→
+   874→    const priceUpdates: Record<string, number> = {}
+   875→    const pnlUpdates: Record<string, number> = {}
+   876→    let hasChanges = false
+   877→
+   878→    for (const pos of positions) {
+   879→      if (!pos.isOpen && pos.isOpen !== undefined) continue
+   880→      if (pos.segment !== 'EQUITY') continue
+   881→
+   882→      const quote = wsStockQuotes[pos.symbol]
+   883→      if (quote && quote.last_price > 0) {
+   884→        const newPrice = quote.last_price
+   885→        const currentLive = livePricesRef.current[pos.id]
+   886→        if (currentLive !== newPrice) {
+   887→          if (currentLive !== undefined) {
+   888→            prevPricesRef.current[pos.id] = currentLive
+   889→          }
+   890→          if (currentLive !== undefined && currentLive > 0) {
+   891→            const prevPnl = pos.tradeDirection === 'BUY'
+   892→              ? (currentLive - pos.entryPrice) * pos.quantity
+   893→              : (pos.entryPrice - currentLive) * pos.quantity
+   894→            pnlUpdates[pos.id] = Math.round(prevPnl * 100) / 100
+   895→          }
+   896→          priceUpdates[pos.id] = newPrice
+   897→          hasChanges = true
+   898→        }
+   899→      }
+   900→    }
+   901→
+   902→    if (hasChanges) {
+   903→      livePricesRef.current = { ...livePricesRef.current, ...priceUpdates }
+   904→      setLivePrices(prev => ({ ...prev, ...priceUpdates }))
+   905→      if (Object.keys(pnlUpdates).length > 0) {
+   906→        prevPnlRef.current = { ...prevPnlRef.current, ...pnlUpdates }
+   907→        setPrevPnlMap(prev => ({ ...prev, ...pnlUpdates }))
+   908→      }
+   909→    }
+   910→  }, [wsStockQuotes, wsStatus, positions, marketOpen])
+   911→
+   912→  // ─── Fetch Positions ──────────────────────────────────────
+   913→  const fetchPositions = useCallback(async () => {
+   914→    if (!token) { setLoading(false); return }
+   915→    try {
+   916→      const res = await fetch('/api/trade/positions', {
+   917→        headers: { Authorization: `Bearer ${token}` },
+   918→      })
+   919→      if (res.ok) {
+   920→        const json = await res.json()
+   921→        const newPos = json.data || []
+   922→        setPositions(newPos)
+   923→        // Initialize live prices keyed by pos.id (NOT pos.symbol)
+   924→        // This ensures different strikes of same underlying get separate prices
+   925→        const initialPrices: Record<string, number> = {}
+   926→        for (const pos of newPos) {
+   927→          if (pos.isOpen !== false) {
+   928→            // For equity, prefer SSE/wsStockQuotes (handled in separate useEffect)
+   929→            // For options/futures, use the server-provided currentPrice as initial value
+   930→            if (pos.segment !== 'EQUITY') {
+   931→              initialPrices[pos.id] = pos.currentPrice
+   932→            }
+   933→          }
+   934→        }
+   935→        if (Object.keys(initialPrices).length > 0) {
+   936→          livePricesRef.current = { ...livePricesRef.current, ...initialPrices }
+   937→          setLivePrices(prev => ({ ...prev, ...initialPrices }))
+   938→        }
+   939→      } else {
+   940→        setPositions([])
+   941→      }
+   942→    } catch {
+   943→      setPositions([])
+   944→    } finally {
+   945→      setLoading(false)
+   946→    }
+   947→  }, [token, wsStatus, tradeSignal])
+   948→
+   949→  useEffect(() => {
+   950→    fetchPositions()
+   951→    // Initial fetch + refresh on trade signal
+   952→    return () => {}
+   953→  }, [fetchPositions])
+   954→
+   955→  // ─── WS Position Stream (EQUITY prices + exit events) ──────
+   956→  // Server pushes EQUITY live prices + exit events via WebSocket.
+   957→  // OPTIONS prices come from OC WS (separate effect below).
+   958→  useEffect(() => {
+   959→    if (!token) return
+   960→
+   961→    // Subscribe to positions channel
+   962→    wsClient.subscribe('positions')
+   963→
+   964→    // Listen for position updates
+   965→    const unsubPositions = wsClient.on('positions', (data) => {
+   966→      if (!data) return
+   967→
+   968→      const priceUpdates: Record<string, number> = {}
+   969→      const pnlUpdates: Record<string, number> = {}
+   970→      const exitEvents: Record<string, { reason: string; exitPrice: number; pnl: number; timestamp: number }> = {}
+   971→
+   972→      for (const update of data) {
+   973→        // OPTIONS: price comes from OC WS — skip server price, only handle exits
+   974→        if (update.segment === 'OPTIONS') {
+   975→          if (update.exitEvent) {
+   976→            exitEvents[update.positionId] = update.exitEvent
+   977→          }
+   978→          continue
+   979→        }
+   980→
+   981→        // EQUITY / FUTURES: use server price
+   982→        const prevLive = livePricesRef.current[update.positionId]
+   983→        if (prevLive !== undefined && prevLive !== update.currentPrice) {
+   984→          prevPricesRef.current[update.positionId] = prevLive
+   985→        }
+   986→
+   987→        priceUpdates[update.positionId] = update.currentPrice
+   988→        pnlUpdates[update.positionId] = update.unrealizedPnl
+   989→
+   990→        if (update.exitEvent) {
+   991→          exitEvents[update.positionId] = update.exitEvent
+   992→        }
+   993→      }
+   994→
+   995→      if (Object.keys(priceUpdates).length > 0) {
+   996→        livePricesRef.current = { ...livePricesRef.current, ...priceUpdates }
+   997→        setLivePrices(prev => ({ ...prev, ...priceUpdates }))
+   998→        setPrevPnlMap(prev => ({ ...prev, ...pnlUpdates }))
+   999→        setPositions(prev => prev.map(pos => {
+  1000→          if (priceUpdates[pos.id] !== undefined) {
+  1001→            return {
+  1002→              ...pos,
+  1003→              currentPrice: priceUpdates[pos.id],
+  1004→              unrealizedPnl: pnlUpdates[pos.id] ?? pos.unrealizedPnl,
+  1005→            }
+  1006→          }
+  1007→          return pos
+  1008→        }))
+  1009→      }
+  1010→
+  1011→      // Handle exit events — show toast and refetch
+  1012→      for (const [posId, evt] of Object.entries(exitEvents)) {
+  1013→        const reasonLabel = evt.reason === 'STOP_LOSS' ? 'Stop Loss' : 'Target'
+  1014→        toast.success(`${reasonLabel} hit! Auto-exited @ ₹${evt.exitPrice}`, {
+  1015→          description: `P&L: ${formatPnL(evt.pnl)}`,
+  1016→          duration: 5000,
+  1017→        })
+  1018→        setTimeout(() => fetchPositions(), 500)
+  1019→      }
+  1020→    })
+  1021→
+  1022→    // Listen for exit events
+  1023→    const unsubExit = wsClient.on('exit', (evt) => {
+  1024→      if (!evt) return
+  1025→      const reasonLabel = evt.reason === 'STOP_LOSS' ? 'Stop Loss' : 'Target'
+  1026→      toast.success(`${reasonLabel} hit! ${evt.symbol} @ ₹${evt.exitPrice}`, {
+  1027→        description: `P&L: ${formatPnL(evt.pnl)}`,
+  1028→        duration: 5000,
+  1029→      })
+  1030→      setTimeout(() => fetchPositions(), 500)
+  1031→    })
+  1032→
+  1033→    return () => {
+  1034→      unsubPositions()
+  1035→      unsubExit()
+  1036→      wsClient.unsubscribe('positions')
+  1037→    }
+  1038→  }, [token, fetchPositions])
+  1039→
+  1040→  // ─── OPTIONS: Subscribe to Option Chain WS for real-time strike LTP ──
+  1041→
+  1042→  const ocComboStr = useMemo(() => {
+  1043→    const keys = new Set<string>()
+  1044→    for (const pos of positions) {
+  1045→      if (pos.isOpen && pos.segment === 'OPTIONS' && pos.strikePrice && pos.expiryDate) {
+  1046→        const expiry = new Date(pos.expiryDate).toISOString().split('T')[0]
+  1047→        keys.add(`${pos.symbol.toUpperCase()}::${expiry}`)
+  1048→      }
+  1049→    }
+  1050→    return [...keys].sort().join(',')
+  1051→  }, [positions])
+  1052→
+  1053→  useEffect(() => {
+  1054→    if (!marketOpen) {
+  1055→      for (const [key, cleanups] of ocCleanupRef.current) {
+  1056→        cleanups.forEach(fn => fn())
+  1057→      }
+  1058→      ocCleanupRef.current.clear()
+  1059→      return
+  1060→    }
+  1061→
+  1062→    const neededKeys = new Set(ocComboStr.split(',').filter(Boolean))
+  1063→
+  1064→    // Cleanup OC subs no longer needed
+  1065→    for (const [key, cleanups] of ocCleanupRef.current) {
+  1066→      if (!neededKeys.has(key)) {
+  1067→        cleanups.forEach(fn => fn())
+  1068→        ocCleanupRef.current.delete(key)
+  1069→      }
+  1070→    }
+  1071→
+  1072→    // Create OC subscriptions for new combos
+  1073→    for (const key of neededKeys) {
+  1074→      if (ocCleanupRef.current.has(key)) continue
+  1075→      const [underlying, expiry] = key.split('::')
+  1076→
+  1077→      wsClient.subscribe('options', { underlying, expiry })
+  1078→
+  1079→      let rafId: number | null = null
+  1080→      const pendingPrices: Record<string, number> = {}
+  1081→      const pendingPnls: Record<string, number> = {}
+  1082→
+  1083→      const flushUpdates = () => {
+  1084→        rafId = null
+  1085→        const prices = { ...pendingPrices }
+  1086→        const pnls = { ...pendingPnls }
+  1087→        for (const k of Object.keys(pendingPrices)) delete pendingPrices[k]
+  1088→        for (const k of Object.keys(pendingPnls)) delete pendingPnls[k]
+  1089→
+  1090→        if (Object.keys(prices).length > 0) {
+  1091→          livePricesRef.current = { ...livePricesRef.current, ...prices }
+  1092→          setLivePrices(prev => ({ ...prev, ...prices }))
+  1093→        }
+  1094→        if (Object.keys(pnls).length > 0) {
+  1095→          prevPnlRef.current = { ...prevPnlRef.current, ...pnls }
+  1096→          setPrevPnlMap(prev => ({ ...prev, ...pnls }))
+  1097→        }
+  1098→      }
+  1099→
+  1100→      const unsub = wsClient.on('options:update', (msg) => {
+  1101→        try {
+  1102→          if (!msg?.strikes) return
+  1103→
+  1104→          const strikes: any[] = msg.strikes
+  1105→          let hasChanges = false
+  1106→
+  1107→          const spot = msg.spot || 0
+  1108→          for (const s of strikes) {
+  1109→            const ceKey = `${underlying}::${expiry}::${s.strike_price}::CE`
+  1110→            const peKey = `${underlying}::${expiry}::${s.strike_price}::PE`
+  1111→            ocDataCacheRef.current.set(ceKey, {
+  1112→              instrumentKey: s.call_options?.instrument_key || '',
+  1113→              greeks: s.call_options?.option_greeks || null,
+  1114→              marketData: s.call_options?.market_data || null,
+  1115→              spot,
+  1116→            })
+  1117→            ocDataCacheRef.current.set(peKey, {
+  1118→              instrumentKey: s.put_options?.instrument_key || '',
+  1119→              greeks: s.put_options?.option_greeks || null,
+  1120→              marketData: s.put_options?.market_data || null,
+  1121→              spot,
+  1122→            })
+  1123→          }
+  1124→
+  1125→          const currentPositions = positionsRef.current
+  1126→          for (const pos of currentPositions) {
+  1127→            if (!pos.isOpen || pos.segment !== 'OPTIONS' || !pos.strikePrice) continue
+  1128→
+  1129→            const posExpiry = pos.expiryDate ? new Date(pos.expiryDate).toISOString().split('T')[0] : null
+  1130→            if (pos.symbol.toUpperCase() !== underlying || posExpiry !== expiry) continue
+  1131→
+  1132→            const strike = strikes.find((s: any) => s.strike_price === pos.strikePrice)
+  1133→            if (!strike) continue
+  1134→
+  1135→            const optData = pos.optionType === 'CE'
+  1136→              ? strike.call_options?.market_data
+  1137→              : strike.put_options?.market_data
+  1138→            if (!optData?.ltp || optData.ltp <= 0) continue
+  1139→
+  1140→            const newPrice = optData.ltp
+  1141→            const currentLive = livePricesRef.current[pos.id]
+  1142→            if (currentLive !== newPrice) {
+  1143→              if (currentLive !== undefined) {
+  1144→                prevPricesRef.current[pos.id] = currentLive
+  1145→              }
+  1146→              if (currentLive !== undefined && currentLive > 0) {
+  1147→                const prevPnl = pos.tradeDirection === 'BUY'
+  1148→                  ? (currentLive - pos.entryPrice) * pos.quantity
+  1149→                  : (pos.entryPrice - currentLive) * pos.quantity
+  1150→                pendingPnls[pos.id] = Math.round(prevPnl * 100) / 100
+  1151→              }
+  1152→              pendingPrices[pos.id] = newPrice
+  1153→              hasChanges = true
+  1154→            }
+  1155→          }
+  1156→
+  1157→          if (hasChanges && !rafId) {
+  1158→            rafId = requestAnimationFrame(flushUpdates)
+  1159→          }
+  1160→        } catch { /* ignore parse errors */ }
+  1161→      })
+  1162→
+  1163→      ocCleanupRef.current.set(key, [unsub])
+  1164→    }
+  1165→
+  1166→    return () => {
+  1167→      for (const [key, cleanups] of ocCleanupRef.current) {
+  1168→        cleanups.forEach(fn => fn())
+  1169→      }
+  1170→      ocCleanupRef.current.clear()
+  1171→    }
+  1172→  }, [ocComboStr, marketOpen])
+  1173→
+  1174→  // ─── Square Off ───────────────────────────────────────────
+  1175→  const handleSquareOff = useCallback(async (positionId: string, symbol: string) => {
+  1176→    if (!token) return
+  1177→    setSquaringOff(positionId)
+  1178→    try {
+  1179→      const res = await fetch('/api/trade/square-off', {
+  1180→        method: 'POST',
+  1181→        headers: {
+  1182→          Authorization: `Bearer ${token}`,
+  1183→          'Content-Type': 'application/json',
+  1184→        },
+  1185→        body: JSON.stringify({ positionId }),
+  1186→      })
+  1187→      const data = await res.json()
+  1188→      if (res.ok && data.success) {
+  1189→        const pnlStr = data.closedPosition
+  1190→          ? `P&L: ${formatPnL(data.closedPosition.realizedPnl)}`
+  1191→          : ''
+  1192→        toast.success(`✅ ${symbol} squared off successfully!`, {
+  1193→          description: pnlStr,
+  1194→        })
+  1195→        setPositions(prev => prev.filter(p => p.id !== positionId))
+  1196→        fetchPositions()
+  1197→      } else {
+  1198→        toast.error(data.error || 'Failed to square off position')
+  1199→      }
+  1200→    } catch {
+  1201→      toast.error('Network error')
+  1202→    } finally {
+  1203→      setSquaringOff(null)
+  1204→    }
+  1205→  }, [token, fetchPositions])
+  1206→
+  1207→  // ─── View Details handler ─────────────────────────────────
+  1208→  const handleViewDetails = useCallback((pos: PositionData) => {
+  1209→    setDetailPosition(pos)
+  1210→    setDetailOpen(true)
+  1211→  }, [])
+  1212→
+  1213→  // ─── Open Strike Overview from OPTIONS position ──────────────
+  1214→  const handleOpenStrikeOverview = useCallback((pos: PositionData) => {
+  1215→    if (pos.segment !== 'OPTIONS' || !pos.strikePrice || !pos.expiryDate || !pos.optionType) return
+  1216→    const expiry = new Date(pos.expiryDate).toISOString().split('T')[0]
+  1217→    const cacheKey = `${pos.symbol.toUpperCase()}::${expiry}::${pos.strikePrice}::${pos.optionType}`
+  1218→    const cached = ocDataCacheRef.current.get(cacheKey)
+  1219→    if (cached && cached.instrumentKey) {
+  1220→      setStrikeOverview({
+  1221→        underlying: pos.symbol.toUpperCase(),
+  1222→        strike: pos.strikePrice,
+  1223→        optionType: pos.optionType as 'CE' | 'PE',
+  1224→        instrumentKey: cached.instrumentKey,
+  1225→        ltp: cached.marketData?.ltp || livePrices[pos.id] || pos.currentPrice,
+  1226→        greeks: cached.greeks,
+  1227→        marketData: cached.marketData,
+  1228→        spot: cached.spot,
+  1229→      })
+  1230→    }
+  1231→  }, [livePrices])
+  1232→
+  1233→  // ─── Split positions by open/closed and segment ───────────
+  1234→  const openStockPositions = useMemo(() =>
+  1235→    positions.filter(p => p.isOpen !== false && isStockPosition(p)),
+  1236→    [positions]
+  1237→  )
+  1238→
+  1239→  const openIndexPositions = useMemo(() =>
+  1240→    positions.filter(p => p.isOpen !== false && isIndexPosition(p)),
+  1241→    [positions]
+  1242→  )
+  1243→
+  1244→  // Closed positions: Only show trades from the last 24 hours (today)
+  1245→  const closedStockPositions = useMemo(() => {
+  1246→    const now = Date.now()
+  1247→    const twentyFourHoursAgo = now - 24 * 60 * 60 * 1000
+  1248→    return positions.filter(p => {
+  1249→      if (p.isOpen !== false) return false
+  1250→      if (!isStockPosition(p)) return false
+  1251→      // Use closedAt (from API), fallback to createdAt
+  1252→      const closedTime = p.closedAt ? new Date(p.closedAt).getTime() : p.createdAt ? new Date(p.createdAt).getTime() : 0
+  1253→      return closedTime >= twentyFourHoursAgo
+  1254→    })
+  1255→  }, [positions])
+  1256→
+  1257→  const closedIndexPositions = useMemo(() => {
+  1258→    const now = Date.now()
+  1259→    const twentyFourHoursAgo = now - 24 * 60 * 60 * 1000
+  1260→    return positions.filter(p => {
+  1261→      if (p.isOpen !== false) return false
+  1262→      if (!isIndexPosition(p)) return false
+  1263→      const closedTime = p.closedAt ? new Date(p.closedAt).getTime() : p.createdAt ? new Date(p.createdAt).getTime() : 0
+  1264→      return closedTime >= twentyFourHoursAgo
+  1265→    })
+  1266→  }, [positions])
+  1267→
+  1268→  // All open positions combined for banner
+  1269→  const allOpenPositions = useMemo(() =>
+  1270→    positions.filter(p => p.isOpen !== false),
+  1271→    [positions]
+  1272→  )
+  1273→
+  1274→  // Current segment's open/closed positions (nifty/banknifty/finnifty all use index positions)
+  1275→  const isStockSegment = segmentTab === 'stocks'
+  1276→  const currentOpenPositions = isStockSegment ? openStockPositions : openIndexPositions
+  1277→  const currentClosedPositions = isStockSegment ? closedStockPositions : closedIndexPositions
+  1278→
+  1279→  // ─── Total P&L (real-time) ────────────────────────────────
+  1280→  const totalPnl = useMemo(() => {
+  1281→    return allOpenPositions.reduce((s, pos) => {
+  1282→      const livePrice = livePrices[pos.id] ?? pos.currentPrice
+  1283→      let pnl: number
+  1284→      if (pos.tradeDirection === 'BUY') {
+  1285→        pnl = (livePrice - pos.entryPrice) * pos.quantity
+  1286→      } else {
+  1287→        pnl = (pos.entryPrice - livePrice) * pos.quantity
+  1288→      }
+  1289→      return s + pnl
+  1290→    }, 0)
+  1291→  }, [allOpenPositions, livePrices])
+  1292→
+  1293→  const isLive = wsStatus === 'connected' && marketOpen
+  1294→
+  1295→  // Get live price for detail position
+  1296→  const detailLivePrice = detailPosition ? (livePrices[detailPosition.id] ?? detailPosition.currentPrice) : undefined
+  1297→
+  1298→  return (
+  1299→    <div className="min-h-screen bg-background flex flex-col">
+  1300→      <div className="flex-1 px-4 sm:px-6 lg:px-8 py-6 space-y-5 max-w-4xl mx-auto w-full">
+  1301→        {/* ── Page Header ─────────────────────────────────────── */}
+  1302→        <div className="flex items-center gap-2">
+  1303→          <h1 className="text-2xl sm:text-3xl font-bold text-foreground tracking-tight">
+  1304→            Positions
+  1305→          </h1>
+  1306→          {isLive && (
+  1307→            <span className="flex items-center gap-1 text-[10px] font-bold text-[#00B386] bg-[#00B386]/10 px-2 py-0.5 rounded-full uppercase tracking-wider">
+  1308→              <span className="size-1.5 rounded-full bg-[#00B386] animate-pulse" />
+  1309→              Live
+  1310→            </span>
+  1311→          )}
+  1312→        </div>
+  1313→        <p className="text-muted-foreground text-sm -mt-3">
+  1314→          Track and manage your trades with real-time P&amp;L updates.
+  1315→        </p>
+  1316→
+  1317→        {/* ── Total P&L Banner - only P&L, no investment ──────── */}
+  1318→        {allOpenPositions.length > 0 && (
+  1319→          <TotalPnLBanner
+  1320→            totalPnl={totalPnl}
+  1321→            openCount={allOpenPositions.length}
+  1322→            isLive={isLive}
+  1323→          />
+  1324→        )}
+  1325→
+  1326→        {/* ── Tab Switcher: Open / Closed ──────────────────────── */}
+  1327→        <div className="flex items-center gap-3">
+  1328→          <div className="flex items-center gap-1 bg-border/60 p-1 rounded-xl w-fit">
+  1329→            <button
+  1330→              className={`px-4 py-2 rounded-lg text-[13px] font-semibold transition-all ${
+  1331→                activeTab === 'open'
+  1332→                  ? 'bg-card text-foreground shadow-sm'
+  1333→                  : 'text-muted-foreground hover:text-foreground'
+  1334→              }`}
+  1335→              onClick={() => setActiveTab('open')}
+  1336→            >
+  1337→              Open
+  1338→              <span className={`ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full ${
+  1339→                activeTab === 'open' ? 'bg-[#00D09C]/10 text-[#00D09C]' : 'bg-muted-foreground/10 text-muted-foreground'
+  1340→              }`}>
+  1341→                {allOpenPositions.length}
+  1342→              </span>
+  1343→            </button>
+  1344→            <button
+  1345→              className={`px-4 py-2 rounded-lg text-[13px] font-semibold transition-all ${
+  1346→                activeTab === 'closed'
+  1347→                  ? 'bg-card text-foreground shadow-sm'
+  1348→                  : 'text-muted-foreground hover:text-foreground'
+  1349→              }`}
+  1350→              onClick={() => setActiveTab('closed')}
+  1351→            >
+  1352→              Closed
+  1353→              <span className={`ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full ${
+  1354→                activeTab === 'closed' ? 'bg-muted-foreground/10 text-foreground' : 'bg-muted-foreground/10 text-muted-foreground'
+  1355→              }`}>
+  1356→                {closedStockPositions.length + closedIndexPositions.length}
+  1357→              </span>
+  1358→            </button>
+  1359→          </div>
+  1360→        </div>
+  1361→
+  1362→        {/* ── Segment Sub-Tabs: Stocks / Index ─────────────────── */}
+  1363→        <div className="flex items-center gap-1 bg-card border border-border p-1 rounded-xl w-fit">
+  1364→          <button
+  1365→            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-[12px] font-semibold transition-all ${
+  1366→              segmentTab === 'stocks'
+  1367→                ? 'bg-[#00D09C]/10 text-[#00D09C] border border-[#00D09C]/20'
+  1368→                : 'text-muted-foreground hover:text-foreground border border-transparent'
+  1369→            }`}
+  1370→            onClick={() => setPositionsTab('stocks')}
+  1371→          >
+  1372→            <Briefcase className="size-3.5" />
+  1373→            Stocks
+  1374→            <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+  1375→              segmentTab === 'stocks'
+  1376→                ? 'bg-[#00D09C]/15 text-[#00D09C]'
+  1377→                : 'bg-muted-foreground/10 text-muted-foreground'
+  1378→            }`}>
+  1379→              {activeTab === 'open' ? openStockPositions.length : closedStockPositions.length}
+  1380→            </span>
+  1381→          </button>
+  1382→          <button
+  1383→            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-[12px] font-semibold transition-all ${
+  1384→              segmentTab === 'index'
+  1385→                ? 'bg-[#00D09C]/10 text-[#00D09C] border border-[#00D09C]/20'
+  1386→                : 'text-muted-foreground hover:text-foreground border border-transparent'
+  1387→            }`}
+  1388→            onClick={() => setPositionsTab('index')}
+  1389→          >
+  1390→            <LineChart className="size-3.5" />
+  1391→            Index
+  1392→            <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+  1393→              segmentTab === 'index'
+  1394→                ? 'bg-[#00D09C]/15 text-[#00D09C]'
+  1395→                : 'bg-muted-foreground/10 text-muted-foreground'
+  1396→            }`}>
+  1397→              {activeTab === 'open' ? openIndexPositions.length : closedIndexPositions.length}
+  1398→            </span>
+  1399→          </button>
+  1400→        </div>
+  1401→
+  1402→        {/* ── Positions List ──────────────────────────────────── */}
+  1403→        {loading ? (
+  1404→          <div className="space-y-3">
+  1405→            {Array.from({ length: 3 }).map((_, i) => (
+  1406→              <div key={i} className="bg-card rounded-2xl border border-border p-4">
+  1407→                <div className="flex items-start justify-between">
+  1408→                  <div className="space-y-2">
+  1409→                    <Skeleton className="h-5 w-24 bg-[#f0f0f5]" />
+  1410→                    <Skeleton className="h-3 w-32 bg-[#f0f0f5]" />
+  1411→                  </div>
+  1412→                  <Skeleton className="h-12 w-28 rounded-xl bg-[#f0f0f5]" />
+  1413→                </div>
+  1414→                <div className="flex gap-4 mt-3">
+  1415→                  <Skeleton className="h-8 w-16 bg-[#f0f0f5]" />
+  1416→                  <Skeleton className="h-8 w-16 bg-[#f0f0f5]" />
+  1417→                </div>
+  1418→              </div>
+  1419→            ))}
+  1420→          </div>
+  1421→        ) : activeTab === 'open' ? (
+  1422→          currentOpenPositions.length === 0 ? (
+  1423→            <div className="flex flex-col items-center justify-center py-20 text-center">
+  1424→              <div className="size-20 rounded-full bg-muted flex items-center justify-center mb-5">
+  1425→                {isStockSegment ? (
+  1426→                  <Briefcase className="size-9 text-muted-foreground/30" />
+  1427→                ) : (
+  1428→                  <LineChart className="size-9 text-muted-foreground/30" />
+  1429→                )}
+  1430→              </div>
+  1431→              <p className="text-foreground font-semibold text-[16px]">
+  1432→                No open {isStockSegment ? 'stock' : 'index'} positions
+  1433→              </p>
+  1434→              <p className="text-muted-foreground text-[13px] mt-1.5">
+  1435→                Place a {isStockSegment ? 'stock' : 'index'} trade to see your positions here
+  1436→              </p>
+  1437→              <Button
+  1438→                size="sm"
+  1439→                className="mt-6 gap-1.5 bg-[#00D09C] hover:bg-[#00b88a] text-white font-semibold rounded-xl px-5"
+  1440→                onClick={() => setCurrentPage(isStockSegment ? 'trading' : 'futures')}
+  1441→              >
+  1442→                <TrendingUp className="size-3.5" />
+  1443→                Start {isStockSegment ? 'Stock' : 'Index'} Trading
+  1444→              </Button>
+  1445→            </div>
+  1446→          ) : (
+  1447→            <div className="space-y-3">
+  1448→              {currentOpenPositions.map((pos) => {
+  1449→                const livePrice = livePrices[pos.id] ?? pos.currentPrice
+  1450→                const prevPrice = prevPricesRef.current[pos.id]
+  1451→                // Position is "live" when it has a real-time price update (SSE or WS)
+  1452→                const isPositionLive = pos.isOpen && (
+  1453→                  (pos.segment === 'EQUITY' && wsStatus === 'connected' && !!wsStockQuotes[pos.symbol] && marketOpen) ||
+  1454→                  (pos.segment !== 'EQUITY' && !!livePrices[pos.id] && livePrices[pos.id] !== pos.currentPrice)
+  1455→                )
+  1456→
+  1457→                return (
+  1458→                  <OpenPositionCard
+  1459→                    key={pos.id}
+  1460→                    pos={pos}
+  1461→                    livePrice={livePrice}
+  1462→                    prevPrice={prevPrice}
+  1463→                    prevPnl={prevPnlMap[pos.id]}
+  1464→                    isLive={isPositionLive}
+  1465→                    onSquareOff={handleSquareOff}
+  1466→                    isSquaringOff={squaringOff === pos.id}
+  1467→                    onViewDetails={handleViewDetails}
+  1468→                    onViewStrikeChart={handleOpenStrikeOverview}
+  1469→                  />
+  1470→                )
+  1471→              })}
+  1472→            </div>
+  1473→          )
+  1474→        ) : (
+  1475→          currentClosedPositions.length === 0 ? (
+  1476→            <div className="flex flex-col items-center justify-center py-20 text-center">
+  1477→              <div className="size-20 rounded-full bg-muted flex items-center justify-center mb-5">
+  1478→                <Clock className="size-9 text-muted-foreground/30" />
+  1479→              </div>
+  1480→              <p className="text-foreground font-semibold text-[16px]">
+  1481→                No closed {isStockSegment ? 'stock' : 'index'} positions today
+  1482→              </p>
+  1483→              <p className="text-muted-foreground text-[13px] mt-1.5">
+  1484→                Your today&apos;s closed {isStockSegment ? 'stock' : 'index'} trades will appear here
+  1485→              </p>
+  1486→            </div>
+  1487→          ) : (
+  1488→            <div className="space-y-3">
+  1489→              {currentClosedPositions.map((pos) => (
+  1490→                <ClosedPositionCard key={pos.id} pos={pos} onViewDetails={handleViewDetails} />
+  1491→              ))}
+  1492→            </div>
+  1493→          )
+  1494→        )}
+  1495→      </div>
+  1496→
+  1497→      {/* ── Detail Sheet ────────────────────────────────────── */}
+  1498→      <PositionDetailSheet
+  1499→        position={detailPosition}
+  1500→        livePrice={detailLivePrice}
+  1501→        open={detailOpen}
+  1502→        onOpenChange={setDetailOpen}
+  1503→        onSquareOff={handleSquareOff}
+  1504→        isSquaringOff={squaringOff === detailPosition?.id}
+  1505→      />
+  1506→
+  1507→      {/* ── Strike Overview Drawer (OPTIONS only) ─────────────── */}
+  1508→      {strikeOverview && (
+  1509→        <StrikeOverviewDrawer
+  1510→          open={!!strikeOverview}
+  1511→          onOpenChange={(open) => { if (!open) setStrikeOverview(null) }}
+  1512→          underlying={strikeOverview.underlying}
+  1513→          strike={strikeOverview.strike}
+  1514→          optionType={strikeOverview.optionType}
+  1515→          expiry={''}
+  1516→          instrumentKey={strikeOverview.instrumentKey}
+  1517→          ltp={strikeOverview.ltp}
+  1518→          greeks={strikeOverview.greeks}
+  1519→          marketData={strikeOverview.marketData}
+  1520→          spot={strikeOverview.spot}
+  1521→        />
+  1522→      )}
+  1523→
+  1524→      {/* ── Sticky Footer ────────────────────────────────────── */}
+  1525→      <footer className="mt-auto border-t border-border bg-card px-4 py-3">
+  1526→        <div className="max-w-4xl mx-auto flex items-center justify-between text-[11px] text-muted-foreground">
+  1527→          <span>{isLive ? 'Live prices updating' : 'Market closed · showing last prices'}</span>
+  1528→          {isLive ? (
+  1529→            <span className="flex items-center gap-1 text-[#00B386] font-semibold">
+  1530→              <span className="size-1.5 rounded-full bg-[#00B386] animate-pulse" />
+  1531→              Market Live
+  1532→            </span>
+  1533→          ) : (
+  1534→            <span className="flex items-center gap-1 text-[#EB5B3C] font-semibold">
+  1535→              <span className="size-1.5 rounded-full bg-[#EB5B3C]" />
+  1536→              Market Closed
+  1537→            </span>
+  1538→          )}
+  1539→        </div>
+  1540→      </footer>
+  1541→    </div>
+  1542→  )
+  1543→}
+  1544→

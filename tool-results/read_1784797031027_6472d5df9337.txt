@@ -1,0 +1,839 @@
+     1→'use client'
+     2→
+     3→import { useState, useEffect, useCallback, useMemo } from 'react'
+     4→import {
+     5→  CandlestickChart,
+     6→  TrendingUp,
+     7→  TrendingDown,
+     8→  Minus,
+     9→  Plus,
+    10→  Search,
+    11→  ChevronDown,
+    12→  ArrowUpRight,
+    13→  ArrowDownRight,
+    14→  X,
+    15→  BarChart3,
+    16→  Wallet,
+    17→  Info,
+    18→  Loader2,
+    19→  Briefcase,
+    20→} from 'lucide-react'
+    21→import { cn } from '@/lib/utils'
+    22→import { Button } from '@/components/ui/button'
+    23→import { Input } from '@/components/ui/input'
+    24→import { Badge } from '@/components/ui/badge'
+    25→import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+    26→import {
+    27→  AreaChart,
+    28→  Area,
+    29→  XAxis,
+    30→  YAxis,
+    31→  CartesianGrid,
+    32→  Tooltip,
+    33→  ResponsiveContainer,
+    34→} from 'recharts'
+    35→import { useAuthStore } from '@/lib/auth-store'
+    36→import { useAppStore } from '@/lib/store'
+    37→import { useTradeSuccess } from '@/components/pepertect/trade-success-popup'
+    38→import { toast } from 'sonner'
+    39→import { formatINR, formatPnL, formatPercent, formatPrice, formatVolume, formatLargeNumber } from '@/lib/format'
+    40→
+    41→// ─── Types ───────────────────────────────────────────────────────────
+    42→type Instrument = 'NIFTY' | 'BANKNIFTY' | 'FINNIFTY' | 'SENSEX' | 'MIDCPNIFTY'
+    43→type OrderType = 'MARKET' | 'LIMIT' | 'SL'
+    44→type Direction = 'BUY' | 'SELL'
+    45→
+    46→interface FuturesContract {
+    47→  id: string
+    48→  name: string
+    49→  expiry: string
+    50→  ltp: number
+    51→  change: number
+    52→  changePct: number
+    53→  oi: number
+    54→  volume: number
+    55→  lotSize: number
+    56→  underlying: string
+    57→  expiryDate: string
+    58→  marginPercent: number
+    59→}
+    60→
+    61→interface PositionData {
+    62→  id: string
+    63→  symbol: string
+    64→  segment: string
+    65→  tradeDirection: string
+    66→  quantity: number
+    67→  entryPrice: number
+    68→  currentPrice: number
+    69→  totalInvested: number
+    70→  currentValue: number
+    71→  unrealizedPnl: number
+    72→  unrealizedPnlPercent: number
+    73→  lots: number
+    74→  lotSize: number
+    75→  marginUsed: number
+    76→  isOpen: boolean
+    77→  expiryDate?: string | null
+    78→}
+    79→
+    80→interface PortfolioData {
+    81→  virtualBalance: number
+    82→  marginUsed: number
+    83→  availableMargin: number
+    84→}
+    85→
+    86→function generatePriceData(spotPrice: number) {
+    87→  const data = []
+    88→  let price = spotPrice - 200 + Math.random() * 50
+    89→  for (let i = 0; i < 60; i++) {
+    90→    price = price + (Math.random() - 0.48) * 30
+    91→    const time = new Date()
+    92→    time.setMinutes(time.getMinutes() - (60 - i))
+    93→    data.push({
+    94→      time: time.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
+    95→      price: Number(price.toFixed(2)),
+    96→    })
+    97→  }
+    98→  return data
+    99→}
+   100→
+   101→const INSTRUMENT_CONFIG: Record<Instrument, { lotSize: number }> = {
+   102→  NIFTY: { lotSize: 50 },
+   103→  BANKNIFTY: { lotSize: 25 },
+   104→  FINNIFTY: { lotSize: 25 },
+   105→  SENSEX: { lotSize: 15 },
+   106→  MIDCPNIFTY: { lotSize: 75 },
+   107→}
+   108→
+   109→// ─── Main Component ──────────────────────────────────────────────────
+   110→export function FuturesPage() {
+   111→  const { token } = useAuthStore()
+   112→  const bumpTradeSignal = useAppStore(s => s.bumpTradeSignal)
+   113→  const { showTradeSuccess } = useTradeSuccess()
+   114→
+   115→  const [instrument, setInstrument] = useState<Instrument>('NIFTY')
+   116→  const [contractIdx, setContractIdx] = useState(0)
+   117→  const [direction, setDirection] = useState<Direction>('BUY')
+   118→  const [orderType, setOrderType] = useState<OrderType>('MARKET')
+   119→  const [lots, setLots] = useState(1)
+   120→  const [price, setPrice] = useState('')
+   121→
+   122→  // Real data states
+   123→  const [contracts, setContracts] = useState<FuturesContract[]>([])
+   124→  const [positions, setPositions] = useState<PositionData[]>([])
+   125→  const [portfolio, setPortfolio] = useState<PortfolioData | null>(null)
+   126→  const [contractsLoading, setContractsLoading] = useState(true)
+   127→  const [positionsLoading, setPositionsLoading] = useState(true)
+   128→  const [placingOrder, setPlacingOrder] = useState(false)
+   129→  const [squaringOff, setSquaringOff] = useState<string | null>(null)
+   130→
+   131→  const config = INSTRUMENT_CONFIG[instrument]
+   132→  const selectedContract = contracts[contractIdx] || null
+   133→
+   134→  // ─── Fetch Futures Contracts ──────────────────────────────────
+   135→  const fetchContracts = useCallback(async () => {
+   136→    setContractsLoading(true)
+   137→    try {
+   138→      const res = await fetch(`/api/futures/${instrument}`)
+   139→      if (res.ok) {
+   140→        const json = await res.json()
+   141→        const futures = (json.data || []).map((f: Record<string, unknown>) => ({
+   142→          id: f.id as string,
+   143→          name: `${f.underlying} ${new Date(f.expiryDate as string).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })}`,
+   144→          expiry: new Date(f.expiryDate as string).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }),
+   145→          ltp: (f.ltp as number) || 0,
+   146→          change: (f.change as number) || 0,
+   147→          changePct: (f.changePercent as number) || 0,
+   148→          oi: Number(((f.openInterest as number) || 0).toFixed(1)),
+   149→          volume: (f.volume as number) || 0,
+   150→          lotSize: (f.lotSize as number) || config.lotSize,
+   151→          underlying: (f.underlying as string) || instrument,
+   152→          expiryDate: f.expiryDate as string,
+   153→          marginPercent: (f.marginPercent as number) || 12,
+   154→        }))
+   155→        setContracts(futures)
+   156→        if (futures.length > 0 && contractIdx >= futures.length) {
+   157→          setContractIdx(0)
+   158→        }
+   159→      } else {
+   160→        setContracts([])
+   161→      }
+   162→    } catch {
+   163→      setContracts([])
+   164→    } finally {
+   165→      setContractsLoading(false)
+   166→    }
+   167→  }, [instrument, config.lotSize, contractIdx])
+   168→
+   169→  // ─── Fetch Positions ──────────────────────────────────────────
+   170→  const fetchPositions = useCallback(async () => {
+   171→    if (!token) { setPositionsLoading(false); return }
+   172→    setPositionsLoading(true)
+   173→    try {
+   174→      const res = await fetch('/api/trade/positions', {
+   175→        headers: { Authorization: `Bearer ${token}` },
+   176→      })
+   177→      if (res.ok) {
+   178→        const json = await res.json()
+   179→        const futuresPositions = (json.data || []).filter(
+   180→          (p: PositionData) => p.segment === 'FUTURES' && p.isOpen
+   181→        )
+   182→        setPositions(futuresPositions)
+   183→      } else {
+   184→        setPositions([])
+   185→      }
+   186→    } catch {
+   187→      setPositions([])
+   188→    } finally {
+   189→      setPositionsLoading(false)
+   190→    }
+   191→  }, [token])
+   192→
+   193→  // ─── Fetch Portfolio ──────────────────────────────────────────
+   194→  const fetchPortfolio = useCallback(async () => {
+   195→    if (!token) { return }
+   196→    try {
+   197→      const res = await fetch('/api/trade/portfolio', {
+   198→        headers: { Authorization: `Bearer ${token}` },
+   199→      })
+   200→      if (res.ok) {
+   201→        const json = await res.json()
+   202→        setPortfolio(json.data)
+   203→      } else {
+   204→        setPortfolio(null)
+   205→      }
+   206→    } catch {
+   207→      setPortfolio(null)
+   208→    }
+   209→  }, [token])
+   210→
+   211→  useEffect(() => {
+   212→    fetchContracts()
+   213→  }, [fetchContracts])
+   214→
+   215→  useEffect(() => {
+   216→    fetchPositions()
+   217→    fetchPortfolio()
+   218→  }, [fetchPositions, fetchPortfolio])
+   219→
+   220→  const priceData = useMemo(() => {
+   221→    if (selectedContract) {
+   222→      return generatePriceData(selectedContract.ltp)
+   223→    }
+   224→    return []
+   225→  }, [selectedContract])
+   226→
+   227→  const availableMargin = portfolio?.availableMargin ?? portfolio?.virtualBalance ?? 100000
+   228→  const totalPnl = positions.reduce((s, p) => s + (p.unrealizedPnl || 0), 0)
+   229→
+   230→  const lotSize = selectedContract?.lotSize || config.lotSize
+   231→  const totalQty = lots * lotSize
+   232→  const marginPercent = selectedContract?.marginPercent || 12
+   233→  const marginRequired = selectedContract
+   234→    ? Math.round(selectedContract.ltp * totalQty * marginPercent / 100 * 100) / 100
+   235→    : 0
+   236→
+   237→  const instruments: Instrument[] = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'SENSEX', 'MIDCPNIFTY']
+   238→  const monthLabels = ['Current Month', 'Next Month', 'Far Month']
+   239→
+   240→  // ─── Place Futures Order ──────────────────────────────────────
+   241→  const handlePlaceOrder = async () => {
+   242→    if (!token || !selectedContract) return
+   243→    setPlacingOrder(true)
+   244→    try {
+   245→      const res = await fetch('/api/trade/place', {
+   246→        method: 'POST',
+   247→        headers: {
+   248→          Authorization: `Bearer ${token}`,
+   249→          'Content-Type': 'application/json',
+   250→        },
+   251→        body: JSON.stringify({
+   252→          symbol: instrument,
+   253→          direction,
+   254→          orderType,
+   255→          segment: 'FUTURES',
+   256→          productType: 'CARRY_FORWARD',
+   257→          quantity: totalQty,
+   258→          lots,
+   259→          price: orderType === 'MARKET' ? undefined : Number(price),
+   260→          expiryDate: selectedContract.expiryDate,
+   261→        }),
+   262→      })
+   263→      const data = await res.json()
+   264→      if (res.ok && data.success) {
+   265→        toast.success(data.message)
+   266→        bumpTradeSignal() // notify positions page
+   267→        showTradeSuccess({
+   268→          symbol: instrument,
+   269→          type: direction,
+   270→          qty: totalQty,
+   271→          price: selectedContract?.ltp || 0,
+   272→          time: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase(),
+   273→          orderId: data.order?.id?.slice(-8).toUpperCase() || 'N/A',
+   274→          segment: 'FUTURES',
+   275→          totalValue: data.order?.totalValue,
+   276→          brokerage: data.order?.brokerage,
+   277→        })
+   278→        await Promise.all([fetchPositions(), fetchPortfolio()])
+   279→      } else {
+   280→        toast.error(data.error || 'Failed to place order')
+   281→      }
+   282→    } catch {
+   283→      toast.error('Network error. Please try again.')
+   284→    } finally {
+   285→      setPlacingOrder(false)
+   286→    }
+   287→  }
+   288→
+   289→  // ─── Square Off Position ──────────────────────────────────────
+   290→  const handleSquareOff = async (positionId: string, symbol: string) => {
+   291→    if (!token) return
+   292→    setSquaringOff(positionId)
+   293→    try {
+   294→      const res = await fetch('/api/trade/square-off', {
+   295→        method: 'POST',
+   296→        headers: {
+   297→          Authorization: `Bearer ${token}`,
+   298→          'Content-Type': 'application/json',
+   299→        },
+   300→        body: JSON.stringify({ positionId }),
+   301→      })
+   302→      const data = await res.json()
+   303→      if (res.ok && data.success) {
+   304→        toast.success(`Squared off ${symbol} futures position`)
+   305→        await Promise.all([fetchPositions(), fetchPortfolio()])
+   306→      } else {
+   307→        toast.error(data.error || 'Failed to square off')
+   308→      }
+   309→    } catch {
+   310→      toast.error('Network error')
+   311→    } finally {
+   312→      setSquaringOff(null)
+   313→    }
+   314→  }
+   315→
+   316→  return (
+   317→    <div className="p-4 md:p-6 space-y-4 max-w-[1600px] mx-auto bg-background min-h-screen">
+   318→      {/* ── Header ────────────────────────────────────────────── */}
+   319→      <div className="flex items-center gap-3 mb-2">
+   320→        <div className="flex size-10 items-center justify-center rounded-xl bg-[#00D09C]/10">
+   321→          <CandlestickChart className="size-5 text-[#00D09C]" />
+   322→        </div>
+   323→        <div>
+   324→          <h1 className="text-xl md:text-2xl font-bold text-foreground">Futures Trading</h1>
+   325→          <p className="text-xs text-muted-foreground">Trade index & stock futures with real positions</p>
+   326→        </div>
+   327→      </div>
+   328→
+   329→      {/* ── Instrument Selector ───────────────────────────────── */}
+   330→      <div className="bg-card border border-border p-4 rounded-xl">
+   331→        <div className="flex flex-wrap items-center gap-2">
+   332→          {instruments.map((inst) => (
+   333→            <button
+   334→              key={inst}
+   335→              onClick={() => { setInstrument(inst); setContractIdx(0) }}
+   336→              className={cn(
+   337→                'px-4 py-1.5 rounded-full text-sm font-semibold transition-all duration-200',
+   338→                instrument === inst
+   339→                  ? 'bg-[#00D09C] text-white shadow-md'
+   340→                  : 'bg-background text-muted-foreground hover:bg-[#00D09C]/10 hover:text-[#00D09C]'
+   341→              )}
+   342→            >
+   343→              {inst}
+   344→            </button>
+   345→          ))}
+   346→        </div>
+   347→      </div>
+   348→
+   349→      {/* ── Contract Selector Tabs ─────────────────────────────── */}
+   350→      <div className="bg-card border border-border p-4 rounded-xl">
+   351→        {contractsLoading ? (
+   352→          <div className="flex items-center justify-center py-8">
+   353→            <Loader2 className="size-6 animate-spin text-[#00D09C]" />
+   354→            <span className="ml-2 text-sm text-muted-foreground">Loading contracts...</span>
+   355→          </div>
+   356→        ) : contracts.length === 0 ? (
+   357→          <div className="text-center py-8 text-muted-foreground text-sm">
+   358→            No futures contracts found for {instrument}. Please seed the database.
+   359→          </div>
+   360→        ) : (
+   361→          <Tabs value={String(contractIdx)} onValueChange={(v) => setContractIdx(Number(v))}>
+   362→            <TabsList className="grid w-full grid-cols-3 mb-3">
+   363→              {monthLabels.map((label, idx) => (
+   364→                <TabsTrigger key={idx} value={String(idx)} className="text-xs md:text-sm" disabled={idx >= contracts.length}>
+   365→                  {label}
+   366→                </TabsTrigger>
+   367→              ))}
+   368→            </TabsList>
+   369→            {contracts.map((contract, idx) => (
+   370→              <TabsContent key={idx} value={String(idx)}>
+   371→                <div className="flex flex-wrap items-center gap-4 md:gap-8">
+   372→                  <div>
+   373→                    <div className="text-xs text-muted-foreground">Contract</div>
+   374→                    <div className="font-bold text-foreground text-sm">{contract.name}</div>
+   375→                  </div>
+   376→                  <div>
+   377→                    <div className="text-xs text-muted-foreground">LTP</div>
+   378→                    <div className="font-mono font-tabular font-bold text-foreground">{formatINR(contract.ltp)}</div>
+   379→                  </div>
+   380→                  <div>
+   381→                    <div className="text-xs text-muted-foreground">Change</div>
+   382→                    <div className={cn(
+   383→                      'font-mono font-tabular font-semibold text-sm',
+   384→                      contract.changePct > 0 ? 'text-[#00B386]' : contract.changePct < 0 ? 'text-[#EB5B3C]' : 'text-muted-foreground'
+   385→                    )}>
+   386→                      {formatPercent(contract.changePct)}
+   387→                      <span className="ml-1 text-xs">({contract.change >= 0 ? '+' : ''}{formatPrice(contract.change)})</span>
+   388→                    </div>
+   389→                  </div>
+   390→                  <div>
+   391→                    <div className="text-xs text-muted-foreground">OI</div>
+   392→                    <div className="font-mono font-tabular text-sm text-foreground">{contract.oi}L</div>
+   393→                  </div>
+   394→                  <div>
+   395→                    <div className="text-xs text-muted-foreground">Volume</div>
+   396→                    <div className="font-mono font-tabular text-sm text-foreground">{formatVolume(contract.volume)}</div>
+   397→                  </div>
+   398→                </div>
+   399→              </TabsContent>
+   400→            ))}
+   401→          </Tabs>
+   402→        )}
+   403→      </div>
+   404→
+   405→      {/* ── Main Trading Panel ─────────────────────────────────── */}
+   406→      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+   407→        {/* Left: Chart + Stats */}
+   408→        <div className="lg:col-span-3 space-y-4">
+   409→          {/* Price Chart */}
+   410→          <div className="bg-card border border-border p-4 rounded-xl">
+   411→            <div className="flex items-center justify-between mb-3">
+   412→              <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
+   413→                <BarChart3 className="size-4 text-[#00D09C]" />
+   414→                {selectedContract?.name || instrument} — Price Movement
+   415→              </h3>
+   416→              <Badge variant="outline" className="text-xs font-mono font-tabular border-border text-muted-foreground">
+   417→                Live
+   418→              </Badge>
+   419→            </div>
+   420→            <div className="h-[300px] md:h-[350px]">
+   421→              {priceData.length > 0 ? (
+   422→                <ResponsiveContainer width="100%" height="100%">
+   423→                  <AreaChart data={priceData} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
+   424→                    <defs>
+   425→                      <linearGradient id="futuresGradient" x1="0" y1="0" x2="0" y2="1">
+   426→                        <stop offset="5%" stopColor="#00D09C" stopOpacity={0.2} />
+   427→                        <stop offset="95%" stopColor="#00D09C" stopOpacity={0} />
+   428→                      </linearGradient>
+   429→                    </defs>
+   430→                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" opacity={0.5} />
+   431→                    <XAxis
+   432→                      dataKey="time"
+   433→                      tick={{ fontSize: 10, fill: '#6b7280' }}
+   434→                      tickLine={false}
+   435→                      axisLine={false}
+   436→                      interval={9}
+   437→                    />
+   438→                    <YAxis
+   439→                      domain={['auto', 'auto']}
+   440→                      tick={{ fontSize: 10, fill: '#6b7280' }}
+   441→                      tickLine={false}
+   442→                      axisLine={false}
+   443→                      tickFormatter={(v: number) => formatLargeNumber(v)}
+   444→                      width={55}
+   445→                    />
+   446→                    <Tooltip
+   447→                      contentStyle={{
+   448→                        backgroundColor: 'var(--card)',
+   449→                        border: '1px solid var(--border)',
+   450→                        borderRadius: '8px',
+   451→                        fontSize: '12px',
+   452→                        color: 'var(--foreground)',
+   453→                      }}
+   454→                      formatter={(value: number) => [formatINR(value), 'Price']}
+   455→                    />
+   456→                    <Area
+   457→                      type="monotone"
+   458→                      dataKey="price"
+   459→                      stroke="#00D09C"
+   460→                      strokeWidth={2}
+   461→                      fill="url(#futuresGradient)"
+   462→                    />
+   463→                  </AreaChart>
+   464→                </ResponsiveContainer>
+   465→              ) : (
+   466→                <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
+   467→                  Select a contract to view chart
+   468→                </div>
+   469→              )}
+   470→            </div>
+   471→          </div>
+   472→
+   473→          {/* Key Stats */}
+   474→          {selectedContract && (
+   475→            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+   476→              <div className="bg-card border border-border p-3 rounded-xl text-center">
+   477→                <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">LTP</div>
+   478→                <div className="font-mono font-tabular font-bold text-foreground text-lg">{formatINR(selectedContract.ltp)}</div>
+   479→              </div>
+   480→              <div className="bg-card border border-border p-3 rounded-xl text-center">
+   481→                <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Change</div>
+   482→                <div className={cn(
+   483→                  'font-mono font-tabular font-bold text-lg',
+   484→                  selectedContract.changePct > 0 ? 'text-[#00B386]' : 'text-[#EB5B3C]'
+   485→                )}>
+   486→                  {formatPercent(selectedContract.changePct)}
+   487→                </div>
+   488→              </div>
+   489→              <div className="bg-card border border-border p-3 rounded-xl text-center">
+   490→                <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Open Interest</div>
+   491→                <div className="font-mono font-tabular font-bold text-foreground text-lg">{selectedContract.oi}L</div>
+   492→              </div>
+   493→              <div className="bg-card border border-border p-3 rounded-xl text-center">
+   494→                <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Volume</div>
+   495→                <div className="font-mono font-tabular font-bold text-foreground text-lg">{formatVolume(selectedContract.volume)}</div>
+   496→              </div>
+   497→              <div className="bg-card border border-border p-3 rounded-xl text-center">
+   498→                <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Lot Size</div>
+   499→                <div className="font-mono font-tabular font-bold text-foreground text-lg">{selectedContract.lotSize}</div>
+   500→              </div>
+   501→              <div className="bg-card border border-border p-3 rounded-xl text-center">
+   502→                <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Margin %</div>
+   503→                <div className="font-mono font-tabular font-bold text-foreground text-lg">{selectedContract.marginPercent}%</div>
+   504→              </div>
+   505→            </div>
+   506→          )}
+   507→        </div>
+   508→
+   509→        {/* Right: Order Panel */}
+   510→        <div className="lg:col-span-2">
+   511→          <div className="bg-card border border-border p-4 rounded-xl space-y-4 sticky top-20">
+   512→            <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
+   513→              <Wallet className="size-4 text-[#00D09C]" />
+   514→              Place Order
+   515→            </h3>
+   516→
+   517→            {!selectedContract ? (
+   518→              <div className="text-center py-6 text-muted-foreground text-sm">
+   519→                No contract available for trading
+   520→              </div>
+   521→            ) : (
+   522→              <>
+   523→                {/* BUY / SELL Toggle */}
+   524→                <div className="flex gap-2">
+   525→                  <button
+   526→                    onClick={() => setDirection('BUY')}
+   527→                    className={cn(
+   528→                      'flex-1 py-2.5 rounded-xl text-sm font-bold transition-all duration-200',
+   529→                      direction === 'BUY'
+   530→                        ? 'bg-[#00d09c] text-white shadow-lg shadow-[#00d09c]/20'
+   531→                        : 'bg-[#00B386]/10 text-[#00B386] hover:bg-[#00B386]/20'
+   532→                    )}
+   533→                  >
+   534→                    <ArrowUpRight className="size-4 inline mr-1" />
+   535→                    BUY
+   536→                  </button>
+   537→                  <button
+   538→                    onClick={() => setDirection('SELL')}
+   539→                    className={cn(
+   540→                      'flex-1 py-2.5 rounded-xl text-sm font-bold transition-all duration-200',
+   541→                      direction === 'SELL'
+   542→                        ? 'bg-[#eb5b3c] text-white shadow-lg shadow-[#eb5b3c]/20'
+   543→                        : 'bg-[#EB5B3C]/10 text-[#EB5B3C] hover:bg-[#eb5b3c]/20'
+   544→                    )}
+   545→                  >
+   546→                    <ArrowDownRight className="size-4 inline mr-1" />
+   547→                    SELL
+   548→                  </button>
+   549→                </div>
+   550→
+   551→                {/* Order Type */}
+   552→                <div className="space-y-1.5">
+   553→                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+   554→                    Order Type
+   555→                  </label>
+   556→                  <div className="flex gap-2">
+   557→                    {(['MARKET', 'LIMIT', 'SL'] as OrderType[]).map((type) => (
+   558→                      <button
+   559→                        key={type}
+   560→                        onClick={() => setOrderType(type)}
+   561→                        className={cn(
+   562→                          'flex-1 py-2 rounded-lg text-xs font-bold transition-all',
+   563→                          orderType === type
+   564→                            ? 'bg-[#00D09C]/10 text-[#00D09C] border border-[#00D09C]/30'
+   565→                            : 'bg-background text-muted-foreground hover:bg-[#00D09C]/5'
+   566→                        )}
+   567→                      >
+   568→                        {type}
+   569→                      </button>
+   570→                    ))}
+   571→                  </div>
+   572→                </div>
+   573→
+   574→                {/* Lots Input */}
+   575→                <div className="space-y-1.5">
+   576→                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+   577→                    Lots
+   578→                  </label>
+   579→                  <div className="flex items-center gap-2">
+   580→                    <Button
+   581→                      variant="outline"
+   582→                      size="icon"
+   583→                      className="size-10 shrink-0 border-border"
+   584→                      onClick={() => setLots(Math.max(1, lots - 1))}
+   585→                    >
+   586→                      <Minus className="size-4" />
+   587→                    </Button>
+   588→                    <Input
+   589→                      type="number"
+   590→                      value={lots}
+   591→                      onChange={(e) => setLots(Math.max(1, parseInt(e.target.value) || 1))}
+   592→                      className="text-center font-mono font-tabular text-lg font-bold h-10 bg-card border-border"
+   593→                    />
+   594→                    <Button
+   595→                      variant="outline"
+   596→                      size="icon"
+   597→                      className="size-10 shrink-0 border-border"
+   598→                      onClick={() => setLots(lots + 1)}
+   599→                    >
+   600→                      <Plus className="size-4" />
+   601→                    </Button>
+   602→                  </div>
+   603→                </div>
+   604→
+   605→                {/* Price Input (for Limit/SL) */}
+   606→                {(orderType === 'LIMIT' || orderType === 'SL') && (
+   607→                  <div className="space-y-1.5">
+   608→                    <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+   609→                      Price (₹)
+   610→                    </label>
+   611→                    <Input
+   612→                      type="number"
+   613→                      value={price}
+   614→                      onChange={(e) => setPrice(e.target.value)}
+   615→                      placeholder={formatPrice(selectedContract.ltp)}
+   616→                      className="font-mono font-tabular h-10 bg-card border-border"
+   617→                    />
+   618→                  </div>
+   619→                )}
+   620→
+   621→                {/* Calculated Fields */}
+   622→                <div className="bg-background border border-border p-3 rounded-xl space-y-2 text-sm">
+   623→                  <div className="flex justify-between">
+   624→                    <span className="text-muted-foreground">Lot Size</span>
+   625→                    <span className="font-mono font-tabular font-medium text-foreground">{lotSize}</span>
+   626→                  </div>
+   627→                  <div className="flex justify-between">
+   628→                    <span className="text-muted-foreground">Total Qty</span>
+   629→                    <span className="font-mono font-tabular font-medium text-foreground">{totalQty}</span>
+   630→                  </div>
+   631→                  <div className="flex justify-between border-t border-border pt-2">
+   632→                    <span className="text-muted-foreground font-semibold">Margin Required</span>
+   633→                    <span className="font-mono font-tabular font-bold text-[#00D09C] text-base">{formatINR(Number(marginRequired))}</span>
+   634→                  </div>
+   635→                </div>
+   636→
+   637→                {/* Available Margin */}
+   638→                <div className="flex items-center justify-between p-3 rounded-lg bg-background">
+   639→                  <div className="flex items-center gap-2">
+   640→                    <Wallet className="size-4 text-[#00D09C]" />
+   641→                    <span className="text-xs font-medium text-muted-foreground">Available Margin</span>
+   642→                  </div>
+   643→                  <span className={cn(
+   644→                    'font-mono font-tabular font-bold text-sm',
+   645→                    availableMargin >= marginRequired ? 'text-[#00B386]' : 'text-[#EB5B3C]'
+   646→                  )}>
+   647→                    {formatINR(availableMargin)}
+   648→                  </span>
+   649→                </div>
+   650→
+   651→                {/* Place Order Button */}
+   652→                <Button
+   653→                  onClick={handlePlaceOrder}
+   654→                  disabled={placingOrder}
+   655→                  className={cn(
+   656→                    'w-full py-3 font-bold text-base transition-all duration-200',
+   657→                    direction === 'BUY'
+   658→                      ? 'bg-[#00d09c] hover:bg-[#00b888] text-white'
+   659→                      : 'bg-[#eb5b3c] hover:bg-[#d44f33] text-white'
+   660→                  )}
+   661→                >
+   662→                  {placingOrder ? (
+   663→                    <><Loader2 className="size-4 mr-2 animate-spin" />Placing Order...</>
+   664→                  ) : direction === 'BUY' ? (
+   665→                    <><ArrowUpRight className="size-4 mr-2" />Place BUY Order</>
+   666→                  ) : (
+   667→                    <><ArrowDownRight className="size-4 mr-2" />Place SELL Order</>
+   668→                  )}
+   669→                </Button>
+   670→
+   671→                <p className="text-[10px] text-center text-muted-foreground flex items-center justify-center gap-1">
+   672→                  <Info className="size-3" />
+   673→                  Paper trading — No real money involved
+   674→                </p>
+   675→              </>
+   676→            )}
+   677→          </div>
+   678→        </div>
+   679→      </div>
+   680→
+   681→      {/* ── Open Futures Positions ─────────────────────────────── */}
+   682→      <div className="bg-card border border-border p-4 rounded-xl">
+   683→        <div className="flex items-center justify-between mb-4">
+   684→          <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
+   685→            <CandlestickChart className="size-4 text-[#00D09C]" />
+   686→            Open Futures Positions
+   687→          </h3>
+   688→          {positions.length > 0 && (
+   689→            <div className="flex items-center gap-3">
+   690→              <span className="text-xs text-muted-foreground">Net P&L:</span>
+   691→              <span className={cn(
+   692→                'font-mono font-tabular font-bold',
+   693→                totalPnl > 0 ? 'text-[#00B386]' : totalPnl < 0 ? 'text-[#EB5B3C]' : 'text-muted-foreground'
+   694→              )}>
+   695→                {formatPnL(totalPnl)}
+   696→              </span>
+   697→            </div>
+   698→          )}
+   699→        </div>
+   700→
+   701→        {positionsLoading ? (
+   702→          <div className="flex items-center justify-center py-8">
+   703→            <Loader2 className="size-6 animate-spin text-[#00D09C]" />
+   704→          </div>
+   705→        ) : positions.length === 0 ? (
+   706→          <div className="flex flex-col items-center justify-center py-12 text-center">
+   707→            <div className="size-12 rounded-full bg-background flex items-center justify-center mb-3">
+   708→              <Briefcase className="size-6 text-muted-foreground" />
+   709→            </div>
+   710→            <p className="text-foreground font-medium text-sm">No open futures positions</p>
+   711→            <p className="text-muted-foreground text-xs mt-1">
+   712→              Place a futures order above to see your positions here
+   713→            </p>
+   714→          </div>
+   715→        ) : (
+   716→          <>
+   717→            {/* Desktop Table */}
+   718→            <div className="hidden md:block overflow-x-auto custom-scrollbar">
+   719→              <table className="w-full text-sm">
+   720→                <thead>
+   721→                  <tr className="border-b border-border text-muted-foreground text-xs uppercase tracking-wider">
+   722→                    <th className="px-3 py-2 text-left">Symbol</th>
+   723→                    <th className="px-3 py-2 text-left">Direction</th>
+   724→                    <th className="px-3 py-2 text-right">Lots</th>
+   725→                    <th className="px-3 py-2 text-right">Entry Price</th>
+   726→                    <th className="px-3 py-2 text-right">LTP</th>
+   727→                    <th className="px-3 py-2 text-right">P&L</th>
+   728→                    <th className="px-3 py-2 text-right">Margin</th>
+   729→                    <th className="px-3 py-2 text-center">Action</th>
+   730→                  </tr>
+   731→                </thead>
+   732→                <tbody>
+   733→                  {positions.map((pos) => {
+   734→                    const isPositive = pos.unrealizedPnl >= 0
+   735→                    return (
+   736→                      <tr key={pos.id} className="border-b border-border hover:bg-[#00D09C]/5 transition-colors">
+   737→                        <td className="px-3 py-2.5 font-semibold text-foreground">
+   738→                          {pos.symbol}
+   739→                          <span className="text-xs text-muted-foreground ml-1">FUT</span>
+   740→                        </td>
+   741→                        <td className="px-3 py-2.5">
+   742→                          <Badge className={cn(
+   743→                            'text-xs font-bold',
+   744→                            pos.tradeDirection === 'BUY'
+   745→                              ? 'bg-[#00B386]/10 text-[#00B386]'
+   746→                              : 'bg-[#EB5B3C]/10 text-[#EB5B3C]'
+   747→                          )}>
+   748→                            {pos.tradeDirection === 'BUY' ? <ArrowUpRight className="size-3 mr-1" /> : <ArrowDownRight className="size-3 mr-1" />}
+   749→                            {pos.tradeDirection}
+   750→                          </Badge>
+   751→                        </td>
+   752→                        <td className="px-3 py-2.5 text-right font-mono font-tabular text-foreground">{pos.lots || Math.round(pos.quantity / (pos.lotSize || 50))}</td>
+   753→                        <td className="px-3 py-2.5 text-right font-mono font-tabular text-foreground">₹{formatPrice(pos.entryPrice)}</td>
+   754→                        <td className="px-3 py-2.5 text-right font-mono font-tabular text-foreground">₹{formatPrice(pos.currentPrice)}</td>
+   755→                        <td className={cn(
+   756→                          'px-3 py-2.5 text-right font-mono font-tabular font-bold',
+   757→                          isPositive ? 'text-[#00B386]' : 'text-[#EB5B3C]'
+   758→                        )}>
+   759→                          {formatPnL(pos.unrealizedPnl)}
+   760→                        </td>
+   761→                        <td className="px-3 py-2.5 text-right font-mono font-tabular text-muted-foreground">
+   762→                          {formatINR(pos.marginUsed || 0)}
+   763→                        </td>
+   764→                        <td className="px-3 py-2.5 text-center">
+   765→                          <Button
+   766→                            variant="outline"
+   767→                            size="sm"
+   768→                            className="text-xs h-7 text-[#EB5B3C] border-[#eb5b3c]/20 hover:bg-[#EB5B3C]/10 hover:text-[#EB5B3C]"
+   769→                            disabled={squaringOff === pos.id}
+   770→                            onClick={() => handleSquareOff(pos.id, pos.symbol)}
+   771→                          >
+   772→                            {squaringOff === pos.id ? (
+   773→                              <Loader2 className="size-3 animate-spin" />
+   774→                            ) : (
+   775→                              <><X className="size-3 mr-1" />Square Off</>
+   776→                            )}
+   777→                          </Button>
+   778→                        </td>
+   779→                      </tr>
+   780→                    )
+   781→                  })}
+   782→                </tbody>
+   783→              </table>
+   784→            </div>
+   785→
+   786→            {/* Mobile Cards */}
+   787→            <div className="md:hidden space-y-3">
+   788→              {positions.map((pos) => {
+   789→                const isPositive = pos.unrealizedPnl >= 0
+   790→                return (
+   791→                  <div key={pos.id} className="p-3 rounded-xl border border-border bg-background space-y-2">
+   792→                    <div className="flex items-center justify-between">
+   793→                      <div className="flex items-center gap-2">
+   794→                        <span className="font-bold text-foreground">{pos.symbol} FUT</span>
+   795→                        <Badge className={cn(
+   796→                          'text-[10px] font-bold',
+   797→                          pos.tradeDirection === 'BUY'
+   798→                            ? 'bg-[#00B386]/10 text-[#00B386]'
+   799→                            : 'bg-[#EB5B3C]/10 text-[#EB5B3C]'
+   800→                        )}>
+   801→                          {pos.tradeDirection}
+   802→                        </Badge>
+   803→                      </div>
+   804→                      <span className={cn(
+   805→                        'font-mono font-tabular font-bold',
+   806→                        isPositive ? 'text-[#00B386]' : 'text-[#EB5B3C]'
+   807→                      )}>
+   808→                        {formatPnL(pos.unrealizedPnl)}
+   809→                      </span>
+   810→                    </div>
+   811→                    <div className="flex justify-between text-xs text-muted-foreground font-tabular">
+   812→                      <span>{pos.lots || Math.round(pos.quantity / (pos.lotSize || 50))} lot(s)</span>
+   813→                      <span>₹{formatPrice(pos.entryPrice)} → ₹{formatPrice(pos.currentPrice)}</span>
+   814→                    </div>
+   815→                    <Button
+   816→                      variant="outline"
+   817→                      size="sm"
+   818→                      className="w-full text-xs h-7 text-[#EB5B3C] border-[#eb5b3c]/20 hover:bg-[#EB5B3C]/10"
+   819→                      disabled={squaringOff === pos.id}
+   820→                      onClick={() => handleSquareOff(pos.id, pos.symbol)}
+   821→                    >
+   822→                      {squaringOff === pos.id ? (
+   823→                        <Loader2 className="size-3 animate-spin mr-1" />
+   824→                      ) : (
+   825→                        <X className="size-3 mr-1" />
+   826→                      )}
+   827→                      Square Off
+   828→                    </Button>
+   829→                  </div>
+   830→                )
+   831→              })}
+   832→            </div>
+   833→          </>
+   834→        )}
+   835→      </div>
+   836→    </div>
+   837→  )
+   838→}
+   839→

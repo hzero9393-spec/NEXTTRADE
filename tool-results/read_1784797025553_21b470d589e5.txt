@@ -1,0 +1,1500 @@
+     1→'use client'
+     2→
+     3→import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react'
+     4→import {
+     5→  Card,
+     6→  CardContent,
+     7→} from '@/components/ui/card'
+     8→import { Button } from '@/components/ui/button'
+     9→import { Badge } from '@/components/ui/badge'
+    10→import { Input } from '@/components/ui/input'
+    11→import { Skeleton } from '@/components/ui/skeleton'
+    12→import {
+    13→  Search,
+    14→  ArrowUpRight,
+    15→  ArrowDownRight,
+    16→  TrendingUp,
+    17→  TrendingDown,
+    18→  AlertCircle,
+    19→  RefreshCw,
+    20→  Minus,
+    21→  Plus,
+    22→  Loader2,
+    23→  ShoppingCart,
+    24→  Star,
+    25→  Zap,
+    26→  ChevronDown,
+    27→} from 'lucide-react'
+    28→import { toast } from 'sonner'
+    29→import { useAuthStore } from '@/lib/auth-store'
+    30→import { useAppStore } from '@/lib/store'
+    31→import { useWatchlistStore } from '@/lib/watchlist-store'
+    32→import { useTradeSuccess } from '@/components/pepertect/trade-success-popup'
+    33→import { TradeConfirmModal, TradeConfirmData } from '@/components/pepertect/ui/trade-confirm-modal'
+    34→import { motion, AnimatePresence } from 'framer-motion'
+    35→import { formatINR, formatVolume, formatPercent, calculateBrokerage } from '@/lib/format'
+    36→import { StockLogo } from '@/components/pepertect/ui/stock-logo'
+    37→import { useStockData, useDerivedData, usePositions, type WsStockQuote, type WsPositionUpdate, type DerivedMarketData } from '@/hooks/use-market-data'
+    38→
+    39→// ─── Types ────────────────────────────────────────────────────────────────
+    40→
+    41→interface TradeableStock {
+    42→  id: string
+    43→  symbol: string
+    44→  name: string
+    45→  currentPrice: number
+    46→  change: number
+    47→  changePercent: number
+    48→  sector: string
+    49→  lotSize: number
+    50→  isFnoBan: boolean
+    51→  isFuturesAvailable: boolean
+    52→  isOptionsAvailable: boolean
+    53→  volume: number
+    54→  marketCap: number
+    55→  week52High: number
+    56→  week52Low: number
+    57→  peRatio: number | null
+    58→}
+    59→
+    60→interface Position {
+    61→  id: string
+    62→  segment: string
+    63→  productType: string
+    64→  tradeDirection: string
+    65→  symbol: string
+    66→  quantity: number
+    67→  entryPrice: number
+    68→  currentPrice: number
+    69→  totalInvested: number
+    70→  currentValue: number
+    71→  unrealizedPnl: number
+    72→  unrealizedPnlPercent: number
+    73→  marginUsed: number
+    74→  isOpen: boolean
+    75→  createdAt: string
+    76→}
+    77→
+    78→interface PortfolioData {
+    79→  virtualBalance: number
+    80→  marginUsed: number
+    81→  availableMargin: number
+    82→  totalInvested: number
+    83→  totalCurrentValue: number
+    84→  totalUnrealizedPnl: number
+    85→  totalRealizedPnl: number
+    86→  totalPortfolioValue: number
+    87→  totalPnl: number
+    88→  totalReturn: number
+    89→  initialCapital: number
+    90→  openPositionsCount: number
+    91→}
+    92→
+    93→// ─── Tab Filter Types ─────────────────────────────────────────────────────
+    94→
+    95→type StockTab = 'all' | 'nifty50' | 'bankNifty' | 'fno' | 'gainers' | 'losers' | 'banking' | 'it' | 'pharma' | 'auto' | 'fmcg' | 'energy' | 'metals' | 'oilGas' | 'finance' | 'telecom' | 'infrastructure' | 'paints' | 'textiles' | 'retail' | 'cement' | 'defence'
+    96→
+    97→const sectorMap: Record<string, string> = {
+    98→  banking: 'Banking',
+    99→  it: 'IT',
+   100→  pharma: 'Pharma',
+   101→  auto: 'Automobile',
+   102→  fmcg: 'FMCG',
+   103→  energy: 'Energy',
+   104→  metals: 'Metals',
+   105→  oilGas: 'Oil & Gas',
+   106→  finance: 'Finance',
+   107→  telecom: 'Telecom',
+   108→  infrastructure: 'Infrastructure',
+   109→  paints: 'Paints',
+   110→  textiles: 'Textiles',
+   111→  retail: 'Retail',
+   112→  cement: 'Cement',
+   113→  defence: 'Defence',
+   114→}
+   115→
+   116→const tabs: { id: StockTab; label: string }[] = [
+   117→  { id: 'all', label: 'All' },
+   118→  { id: 'nifty50', label: 'NIFTY 50' },
+   119→  { id: 'bankNifty', label: 'Bank Nifty' },
+   120→  { id: 'fno', label: 'F&O' },
+   121→  { id: 'gainers', label: 'Gainers' },
+   122→  { id: 'losers', label: 'Losers' },
+   123→  { id: 'banking', label: 'Banking' },
+   124→  { id: 'it', label: 'IT' },
+   125→  { id: 'pharma', label: 'Pharma' },
+   126→  { id: 'auto', label: 'Auto' },
+   127→  { id: 'fmcg', label: 'FMCG' },
+   128→  { id: 'energy', label: 'Energy' },
+   129→  { id: 'metals', label: 'Metals' },
+   130→  { id: 'oilGas', label: 'Oil & Gas' },
+   131→  { id: 'finance', label: 'Finance' },
+   132→  { id: 'telecom', label: 'Telecom' },
+   133→  { id: 'infrastructure', label: 'Infra' },
+   134→  { id: 'paints', label: 'Paints' },
+   135→  { id: 'textiles', label: 'Textiles' },
+   136→  { id: 'retail', label: 'Retail' },
+   137→  { id: 'cement', label: 'Cement' },
+   138→  { id: 'defence', label: 'Defence' },
+   139→]
+   140→
+   141→// NIFTY 50 symbols (major constituents)
+   142→const NIFTY50_SYMBOLS = new Set([
+   143→  'RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK', 'HINDUNILVR',
+   144→  'SBIN', 'BHARTIARTL', 'ITC', 'KOTAKBANK', 'LT', 'AXISBANK',
+   145→  'BAJFINANCE', 'ASIANPAINT', 'MARUTI', 'SUNPHARMA', 'TATAMOTORS',
+   146→  'WIPRO', 'HCLTECH', 'ULTRACEMCO', 'TITAN', 'NESTLEIND', 'NTPC',
+   147→  'POWERGRID', 'ONGC', 'TATASTEEL', 'ADANIENT', 'ADANIPORTS',
+   148→  'JSWSTEEL', 'COALINDIA', 'BPCL', 'HINDALCO', 'GRASIM',
+   149→  'TECHM', 'BAJAJFINSV', 'DRREDDY', 'CIPLA', 'EICHERMOT',
+   150→  'TATACONSUM', 'HEROMOTOCO', 'M&M', 'APOLLOHOSP', 'DIVISLAB',
+   151→  'BRITANNIA', 'INDUSINDBK', 'HDFCLIFE', 'SBILIFE', 'TATAMTRDVR',
+   152→])
+   153→
+   154→// Bank Nifty symbols
+   155→const BANKNIFTY_SYMBOLS = new Set([
+   156→  'HDFCBANK', 'ICICIBANK', 'SBIN', 'KOTAKBANK', 'AXISBANK',
+   157→  'BANKBARODA', 'PNB', 'INDUSINDBK', 'AUBANK', 'BANDHANBNK',
+   158→  'FEDERALBNK', 'IDFCFIRSTB', 'CANBK', 'UNIONBANK', 'IOB',
+   159→  'CENTRALBK', 'BANKINDIA', 'MAHABANK', 'UCOBANK', 'INDIANB',
+   160→])
+   161→
+   162→// ─── Helpers ──────────────────────────────────────────────────────────────
+   163→
+   164→function getSectorColor(sector: string): string {
+   165→  const colors: Record<string, string> = {
+   166→    'Banking': 'bg-[#00D09C]/8 text-[#00D09C]',
+   167→    'IT': 'bg-[#00B386]/8 text-[#00B386]',
+   168→    'Pharma': 'bg-purple-500/8 text-purple-600',
+   169→    'Automobile': 'bg-orange-500/8 text-orange-600',
+   170→    'Auto': 'bg-orange-500/8 text-orange-600',
+   171→    'FMCG': 'bg-pink-500/8 text-pink-600',
+   172→    'Energy': 'bg-yellow-500/8 text-yellow-700',
+   173→    'Metals': 'bg-gray-500/8 text-gray-600',
+   174→    'Oil & Gas': 'bg-amber-500/8 text-amber-700',
+   175→    'Finance': 'bg-[#00D09C]/8 text-[#00D09C]',
+   176→    'Financial Services': 'bg-[#00D09C]/8 text-[#00D09C]',
+   177→    'Telecom': 'bg-teal-500/8 text-teal-600',
+   178→    'Cement': 'bg-amber-500/8 text-amber-700',
+   179→    'Infrastructure': 'bg-sky-500/8 text-sky-600',
+   180→    'Insurance': 'bg-emerald-500/8 text-emerald-600',
+   181→    'Conglomerate': 'bg-violet-500/8 text-violet-600',
+   182→    'Healthcare': 'bg-rose-500/8 text-rose-600',
+   183→    'Construction': 'bg-slate-500/8 text-slate-600',
+   184→    'Mining': 'bg-stone-500/8 text-stone-600',
+   185→  }
+   186→  return colors[sector] || 'bg-[#6b7280]/8 text-muted-foreground'
+   187→}
+   188→
+   189→// ─── Skeleton Row ─────────────────────────────────────────────────────────
+   190→
+   191→function SkeletonRow() {
+   192→  return (
+   193→    <div className="flex items-center justify-between px-5 py-4">
+   194→      <div className="flex items-center gap-3 min-w-0 flex-1">
+   195→        <div className="min-w-0">
+   196→          <Skeleton className="h-4 w-20 mb-1.5 bg-muted" />
+   197→          <Skeleton className="h-3 w-28 bg-muted" />
+   198→        </div>
+   199→      </div>
+   200→      <div className="flex items-center gap-4">
+   201→        <Skeleton className="h-5 w-14 bg-muted rounded-full" />
+   202→        <div className="text-right min-w-[100px]">
+   203→          <Skeleton className="h-5 w-20 mb-1 bg-muted ml-auto" />
+   204→        </div>
+   205→        <Skeleton className="h-6 w-16 bg-muted rounded-full" />
+   206→      </div>
+   207→    </div>
+   208→  )
+   209→}
+   210→
+   211→// ─── Stock Row Component ──────────────────────────────────────────────────
+   212→
+   213→function StockRow({ stock, onClick }: { stock: TradeableStock; onClick: () => void }) {
+   214→  const isPositive = stock.changePercent >= 0
+   215→  const { token } = useAuthStore()
+   216→  const { isInWatchlist, addSymbol, removeSymbol } = useWatchlistStore()
+   217→  const [starLoading, setStarLoading] = useState(false)
+   218→  const inWatchlist = isInWatchlist(stock.symbol)
+   219→
+   220→  const handleToggleWatchlist = async (e: React.MouseEvent) => {
+   221→    e.stopPropagation()
+   222→    if (!token || starLoading) return
+   223→    setStarLoading(true)
+   224→    try {
+   225→      if (inWatchlist) {
+   226→        const res = await fetch('/api/trade/watchlist', {
+   227→          method: 'DELETE',
+   228→          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+   229→          body: JSON.stringify({ symbol: stock.symbol }),
+   230→        })
+   231→        const data = await res.json()
+   232→        if (data.success) {
+   233→          removeSymbol(stock.symbol)
+   234→          toast.success(data.message || `${stock.symbol} removed from watchlist`)
+   235→        } else {
+   236→          toast.error(data.error || 'Failed to remove')
+   237→        }
+   238→      } else {
+   239→        const res = await fetch('/api/trade/watchlist', {
+   240→          method: 'POST',
+   241→          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+   242→          body: JSON.stringify({ symbol: stock.symbol }),
+   243→        })
+   244→        const data = await res.json()
+   245→        if (data.success) {
+   246→          addSymbol(stock.symbol)
+   247→          toast.success(data.message || `${stock.symbol} added to watchlist`)
+   248→        } else {
+   249→          toast.error(data.error || 'Failed to add')
+   250→        }
+   251→      }
+   252→    } catch {
+   253→      toast.error('Network error')
+   254→    } finally {
+   255→      setStarLoading(false)
+   256→    }
+   257→  }
+   258→
+   259→  return (
+   260→    <motion.div
+   261→      className="w-full flex items-center justify-between px-5 py-4 hover:bg-card transition-colors cursor-pointer text-left border-b border-border last:border-b-0 group"
+   262→      whileTap={{ scale: 0.998 }}
+   263→    >
+   264→      <div className="flex items-center gap-3 min-w-0 flex-1" onClick={onClick}>
+   265→        <StockLogo symbol={stock.symbol} name={stock.name} sector={stock.sector} size="md" />
+   266→        <div className="min-w-0">
+   267→          <div className="flex items-center gap-2">
+   268→            <span className="font-bold text-sm text-foreground truncate">{stock.symbol}</span>
+   269→            {(stock.isFuturesAvailable || stock.isOptionsAvailable) && !stock.isFnoBan && (
+   270→              <span className="text-[8px] font-bold bg-[#00D09C]/10 text-[#00D09C] px-1.5 py-0.5 rounded uppercase tracking-wider">
+   271→                F&O
+   272→              </span>
+   273→            )}
+   274→            {stock.isFnoBan && (
+   275→              <span className="text-[8px] font-bold bg-[#EB5B3C]/10 text-[#EB5B3C] px-1.5 py-0.5 rounded uppercase tracking-wider">
+   276→                F&O Ban
+   277→              </span>
+   278→            )}
+   279→          </div>
+   280→          <p className="text-xs text-muted-foreground truncate mt-0.5 max-w-[200px]">{stock.name}</p>
+   281→        </div>
+   282→      </div>
+   283→      <div className="flex items-center gap-3 sm:gap-4 shrink-0">
+   284→        {/* Sector tag - hidden on very small screens */}
+   285→        <span className={`hidden md:inline-flex text-[10px] font-semibold px-2 py-0.5 rounded-full ${getSectorColor(stock.sector)}`}>
+   286→          {stock.sector}
+   287→        </span>
+   288→        {/* LTP */}
+   289→        <div className="text-right min-w-[90px]">
+   290→          <span className="text-base font-bold font-mono font-tabular text-foreground">
+   291→            {formatINR(stock.currentPrice)}
+   292→          </span>
+   293→        </div>
+   294→        {/* Change pill */}
+   295→        <div className={`inline-flex items-center gap-0.5 px-2.5 py-1 rounded-md text-xs font-bold min-w-[72px] justify-center ${
+   296→          isPositive
+   297→            ? 'bg-[#00B386]/10 text-[#00B386]'
+   298→            : 'bg-[#EB5B3C]/10 text-[#EB5B3C]'
+   299→        }`}>
+   300→          {isPositive ? (
+   301→            <ArrowUpRight className="size-3" />
+   302→          ) : (
+   303→            <ArrowDownRight className="size-3" />
+   304→          )}
+   305→          {formatPercent(stock.changePercent)}
+   306→        </div>
+   307→        {/* Watchlist Star */}
+   308→        <button
+   309→          onClick={handleToggleWatchlist}
+   310→          disabled={starLoading}
+   311→          className={`flex size-7 items-center justify-center rounded-lg transition-all duration-200 shrink-0 ${
+   312→            inWatchlist
+   313→              ? 'text-[#00D09C] hover:bg-[#00D09C]/10'
+   314→              : 'text-muted-foreground hover:text-[#00D09C] hover:bg-[#00D09C]/5'
+   315→          }`}
+   316→          title={inWatchlist ? 'Remove from watchlist' : 'Add to watchlist'}
+   317→          aria-label={inWatchlist ? `Remove ${stock.symbol} from watchlist` : `Add ${stock.symbol} to watchlist`}
+   318→        >
+   319→          <Star className={`size-4 ${inWatchlist ? 'fill-[#00D09C]' : ''}`} />
+   320→        </button>
+   321→      </div>
+   322→    </motion.div>
+   323→  )
+   324→}
+   325→
+   326→// ─── Order Panel Component ────────────────────────────────────────────────
+   327→
+   328→function OrderPanel({
+   329→  selectedStock,
+   330→  token,
+   331→  onTradeSuccess: handleTradeSuccess,
+   332→  portfolio,
+   333→  user,
+   334→}: {
+   335→  selectedStock: TradeableStock | null
+   336→  token: string | null
+   337→  onTradeSuccess: () => Promise<void>
+   338→  portfolio: PortfolioData | null
+   339→  user: { virtualBalance?: number; marginUsed?: number } | null
+   340→}) {
+   341→  const { showTradeSuccess } = useTradeSuccess()
+   342→  const [orderSide, setOrderSide] = useState<'buy' | 'sell'>('buy')
+   343→  const [orderType, setOrderType] = useState('MARKET')
+   344→  const [productType, setProductType] = useState('INTRADAY')
+   345→  const [quantity, setQuantity] = useState(10)
+   346→  const [price, setPrice] = useState('')
+   347→  const [stopLoss, setStopLoss] = useState('')
+   348→  const [target, setTarget] = useState('')
+   349→  const [placingOrder, setPlacingOrder] = useState(false)
+   350→  const [confirmModalOpen, setConfirmModalOpen] = useState(false)
+   351→  const [confirmData, setConfirmData] = useState<TradeConfirmData | null>(null)
+   352→
+   353→  // Derive price from selectedStock without useEffect to avoid cascading renders
+   354→  const derivedPrice = selectedStock?.currentPrice.toFixed(2) ?? price
+   355→  const effectivePrice = orderType === 'MARKET' ? derivedPrice : price
+   356→
+   357→  const estimatedTotal = useMemo(() => {
+   358→    const p = orderType === 'MARKET'
+   359→      ? (selectedStock?.currentPrice ?? 0)
+   360→      : (parseFloat(price) || 0)
+   361→    return quantity * p
+   362→  }, [quantity, price, orderType, selectedStock?.currentPrice])
+   363→
+   364→  const estimatedBrokerage = useMemo(() => {
+   365→    return calculateBrokerage(estimatedTotal)
+   366→  }, [estimatedTotal])
+   367→
+   368→  const availableBalance = portfolio?.virtualBalance ?? user?.virtualBalance ?? 0
+   369→  const buyingPower = portfolio?.availableMargin ?? ((user?.virtualBalance ?? 0) - (user?.marginUsed ?? 0))
+   370→
+   371→  const handlePlaceOrder = async () => {
+   372→    if (!token || !selectedStock) return
+   373→
+   374→    if (orderType === 'LIMIT' && (!price || parseFloat(price) <= 0)) {
+   375→      toast.error('Please enter a valid price for LIMIT orders')
+   376→      return
+   377→    }
+   378→
+   379→    if (quantity <= 0) {
+   380→      toast.error('Quantity must be at least 1')
+   381→      return
+   382→    }
+   383→
+   384→    // Open confirmation modal instead of directly placing order
+   385→    const direction = orderSide === 'buy' ? 'BUY' : 'SELL'
+   386→    const fillPrice = orderType === 'MARKET' ? selectedStock.currentPrice : parseFloat(price)
+   387→    setConfirmData({
+   388→      symbol: selectedStock.symbol,
+   389→      direction: direction as 'BUY' | 'SELL',
+   390→      segment: 'EQUITY',
+   391→      productType,
+   392→      orderType,
+   393→      quantity,
+   394→      price: fillPrice,
+   395→      totalValue: estimatedTotal,
+   396→      brokerage: estimatedBrokerage,
+   397→      availableBalance,
+   398→    })
+   399→    setConfirmModalOpen(true)
+   400→  }
+   401→
+   402→  const executeTrade = async (): Promise<{ success: boolean; message?: string; error?: string; orderId?: string; balance?: number; totalValue?: number; brokerage?: number }> => {
+   403→    if (!token || !selectedStock) return { success: false, error: 'No stock selected' }
+   404→
+   405→    const direction = orderSide === 'buy' ? 'BUY' : 'SELL'
+   406→    const body: Record<string, unknown> = {
+   407→      symbol: selectedStock.symbol,
+   408→      direction,
+   409→      orderType,
+   410→      segment: 'EQUITY',
+   411→      productType,
+   412→      quantity,
+   413→    }
+   414→
+   415→    if (orderType === 'LIMIT' && price) {
+   416→      body.price = parseFloat(price)
+   417→    }
+   418→
+   419→    try {
+   420→      const res = await fetch('/api/trade/place', {
+   421→        method: 'POST',
+   422→        headers: {
+   423→          Authorization: `Bearer ${token}`,
+   424→          'Content-Type': 'application/json',
+   425→        },
+   426→        body: JSON.stringify(body),
+   427→      })
+   428→
+   429→      const data = await res.json()
+   430→
+   431→      if (res.ok && data.success) {
+   432→        const fillPrice = orderType === 'MARKET' ? selectedStock.currentPrice : parseFloat(price)
+   433→        showTradeSuccess({
+   434→          symbol: selectedStock.symbol,
+   435→          type: direction as 'BUY' | 'SELL',
+   436→          qty: quantity,
+   437→          price: fillPrice,
+   438→          time: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase(),
+   439→          orderId: data.order?.id?.slice(-8).toUpperCase() || 'N/A',
+   440→          segment: 'EQUITY',
+   441→          totalValue: data.order?.totalValue,
+   442→          brokerage: data.order?.brokerage,
+   443→        })
+   444→        bumpTradeSignal() // notify positions page to refetch
+   445→        // Set SL/Target if provided
+   446→        if ((stopLoss || target) && token && data.order?.id) {
+   447→          const slBody: Record<string, unknown> = { stopLoss: null, target: null }
+   448→          if (stopLoss) slBody.stopLoss = parseFloat(stopLoss)
+   449→          if (target) slBody.target = parseFloat(target)
+   450→          fetch('/api/trade/sl-set', {
+   451→            method: 'POST',
+   452→            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+   453→            body: JSON.stringify({ positionId: data.positionId, ...slBody }),
+   454→          }).catch(() => {})
+   455→        }
+   456→        await handleTradeSuccess()
+   457→        return {
+   458→          success: true,
+   459→          orderId: data.order?.id?.slice(-8).toUpperCase() || 'N/A',
+   460→          balance: data.balance,
+   461→          totalValue: data.order?.totalValue,
+   462→          brokerage: data.order?.brokerage,
+   463→        }
+   464→      } else {
+   465→        return { success: false, error: data.error || 'Failed to place order' }
+   466→      }
+   467→    } catch {
+   468→      return { success: false, error: 'Network error placing order' }
+   469→    }
+   470→  }
+   471→
+   472→  if (!selectedStock) {
+   473→    return (
+   474→      <Card className="bg-card border border-border rounded-xl shadow-sm">
+   475→        <CardContent className="p-6">
+   476→          <div className="flex flex-col items-center justify-center py-8 text-center">
+   477→            <div className="size-12 rounded-full bg-background flex items-center justify-center mb-3">
+   478→              <TrendingUp className="size-6 text-muted-foreground/40" />
+   479→            </div>
+   480→            <p className="text-foreground font-semibold text-sm">No Stock Selected</p>
+   481→            <p className="text-muted-foreground text-xs mt-1">
+   482→              Click on a stock to start trading
+   483→            </p>
+   484→          </div>
+   485→        </CardContent>
+   486→      </Card>
+   487→    )
+   488→  }
+   489→
+   490→  const isPositive = selectedStock.changePercent >= 0
+   491→
+   492→  return (
+   493→    <Card className="bg-card border border-border rounded-xl shadow-sm">
+   494→      <CardContent className="p-6 space-y-5">
+   495→        {/* Stock Info */}
+   496→        <div className="flex items-center justify-between">
+   497→          <div className="flex items-center gap-2.5">
+   498→            <StockLogo symbol={selectedStock.symbol} name={selectedStock.name} sector={selectedStock.sector} size="lg" />
+   499→            <div>
+   500→              <div className="flex items-center gap-2">
+   501→                <span className="font-bold text-lg text-[#00D09C]">{selectedStock.symbol}</span>
+   502→                <span className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-md text-[10px] font-bold ${
+   503→                  isPositive
+   504→                    ? 'bg-[#00B386]/10 text-[#00B386]'
+   505→                    : 'bg-[#EB5B3C]/10 text-[#EB5B3C]'
+   506→                }`}>
+   507→                  {isPositive ? <ArrowUpRight className="size-2.5" /> : <ArrowDownRight className="size-2.5" />}
+   508→                  {formatPercent(selectedStock.changePercent)}
+   509→                </span>
+   510→              </div>
+   511→              <p className="text-xs text-muted-foreground mt-0.5 truncate max-w-[180px]">{selectedStock.name}</p>
+   512→            </div>
+   513→          </div>
+   514→          <div className="text-right">
+   515→            <span className="text-2xl font-bold font-mono font-tabular text-foreground">
+   516→              {formatINR(selectedStock.currentPrice)}
+   517→            </span>
+   518→            <p className={`text-xs font-medium ${isPositive ? 'text-[#00B386]' : 'text-[#EB5B3C]'}`}>
+   519→              {isPositive ? '+' : ''}{formatINR(selectedStock.change)} today
+   520→            </p>
+   521→          </div>
+   522→        </div>
+   523→
+   524→        {/* Buy/Sell Toggle */}
+   525→        <div className="flex rounded-xl bg-background p-1">
+   526→          <button
+   527→            className={`flex-1 h-10 rounded-lg text-sm font-bold transition-all ${
+   528→              orderSide === 'buy'
+   529→                ? 'bg-[#00d09c] text-white shadow-sm'
+   530→                : 'text-muted-foreground hover:text-foreground'
+   531→            }`}
+   532→            onClick={() => setOrderSide('buy')}
+   533→          >
+   534→            Buy
+   535→          </button>
+   536→          <button
+   537→            className={`flex-1 h-10 rounded-lg text-sm font-bold transition-all ${
+   538→              orderSide === 'sell'
+   539→                ? 'bg-[#eb5b3c] text-white shadow-sm'
+   540→                : 'text-muted-foreground hover:text-foreground'
+   541→            }`}
+   542→            onClick={() => setOrderSide('sell')}
+   543→          >
+   544→            Sell
+   545→          </button>
+   546→        </div>
+   547→
+   548→        {/* Order Type & Product Type */}
+   549→        <div className="grid grid-cols-2 gap-3">
+   550→          <div className="space-y-1.5">
+   551→            <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+   552→              Order Type
+   553→            </label>
+   554→            <select
+   555→              value={orderType}
+   556→              onChange={(e) => setOrderType(e.target.value)}
+   557→              className="w-full h-9 rounded-lg border border-border bg-card text-sm text-foreground px-3 focus:outline-none focus:ring-2 focus:ring-[#00D09C]/20 focus:border-[#00D09C]"
+   558→            >
+   559→              <option value="MARKET">Market</option>
+   560→              <option value="LIMIT">Limit</option>
+   561→            </select>
+   562→          </div>
+   563→          <div className="space-y-1.5">
+   564→            <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+   565→              Product
+   566→            </label>
+   567→            <select
+   568→              value={productType}
+   569→              onChange={(e) => setProductType(e.target.value)}
+   570→              className="w-full h-9 rounded-lg border border-border bg-card text-sm text-foreground px-3 focus:outline-none focus:ring-2 focus:ring-[#00D09C]/20 focus:border-[#00D09C]"
+   571→            >
+   572→              <option value="INTRADAY">Intraday</option>
+   573→              <option value="DELIVERY">Delivery</option>
+   574→            </select>
+   575→          </div>
+   576→        </div>
+   577→
+   578→        {/* Quantity */}
+   579→        <div className="space-y-1.5">
+   580→          <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+   581→            Quantity
+   582→          </label>
+   583→          <div className="flex items-center gap-2">
+   584→            <button
+   585→              className="h-9 w-9 flex items-center justify-center rounded-lg border border-border text-muted-foreground hover:bg-background hover:text-foreground transition-colors"
+   586→              onClick={() => setQuantity(Math.max(1, quantity - 10))}
+   587→            >
+   588→              <Minus className="size-3.5" />
+   589→            </button>
+   590→            <Input
+   591→              type="number"
+   592→              value={quantity}
+   593→              onChange={(e) => setQuantity(Math.max(1, parseInt(e.target.value) || 1))}
+   594→              className="h-9 text-center font-mono font-tabular border-border bg-card text-foreground focus:ring-[#00D09C]/20 focus:border-[#00D09C]"
+   595→            />
+   596→            <button
+   597→              className="h-9 w-9 flex items-center justify-center rounded-lg border border-border text-muted-foreground hover:bg-background hover:text-foreground transition-colors"
+   598→              onClick={() => setQuantity(quantity + 10)}
+   599→            >
+   600→              <Plus className="size-3.5" />
+   601→            </button>
+   602→          </div>
+   603→        </div>
+   604→
+   605→        {/* Limit Price */}
+   606→        {orderType === 'LIMIT' && (
+   607→          <div className="space-y-1.5">
+   608→            <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+   609→              Limit Price
+   610→            </label>
+   611→            <Input
+   612→              type="number"
+   613→              value={price}
+   614→              onChange={(e) => setPrice(e.target.value)}
+   615→              className="h-9 font-mono font-tabular border-border bg-card text-foreground focus:ring-[#00D09C]/20 focus:border-[#00D09C]"
+   616→              placeholder="0.00"
+   617→            />
+   618→          </div>
+   619→        )}
+   620→
+   621→        {/* SL / Target */}
+   622→        <div className="grid grid-cols-2 gap-2">
+   623→          <div className="space-y-1.5">
+   624→            <label className="text-[10px] font-bold text-[#EB5B3C] uppercase tracking-wider">Stop Loss</label>
+   625→            <Input
+   626→              type="number"
+   627→              value={stopLoss}
+   628→              onChange={(e) => setStopLoss(e.target.value)}
+   629→              className="h-9 font-mono font-tabular border-border bg-card text-foreground focus:ring-[#EB5B3C]/20 focus:border-[#EB5B3C]"
+   630→              placeholder="Optional"
+   631→            />
+   632→          </div>
+   633→          <div className="space-y-1.5">
+   634→            <label className="text-[10px] font-bold text-[#00B386] uppercase tracking-wider">Target</label>
+   635→            <Input
+   636→              type="number"
+   637→              value={target}
+   638→              onChange={(e) => setTarget(e.target.value)}
+   639→              className="h-9 font-mono font-tabular border-border bg-card text-foreground focus:ring-[#00B386]/20 focus:border-[#00B386]"
+   640→              placeholder="Optional"
+   641→            />
+   642→          </div>
+   643→        </div>
+   644→
+   645→        {/* Order Summary */}
+   646→        <div className="rounded-xl bg-background p-4 space-y-2">
+   647→          <div className="flex items-center justify-between">
+   648→            <span className="text-xs text-muted-foreground">Estimated Total</span>
+   649→            <span className="font-mono font-tabular text-lg font-bold text-foreground">
+   650→              {formatINR(estimatedTotal)}
+   651→            </span>
+   652→          </div>
+   653→          <div className="flex items-center justify-between">
+   654→            <span className="text-[10px] text-muted-foreground">Est. Brokerage (0.05%)</span>
+   655→            <span className="font-mono font-tabular text-[10px] font-medium text-muted-foreground">
+   656→              {formatINR(estimatedBrokerage)}
+   657→            </span>
+   658→          </div>
+   659→          <div className="flex items-center justify-between pt-1 border-t border-border">
+   660→            <span className="text-[10px] text-muted-foreground">Total (incl. brokerage)</span>
+   661→            <span className="font-mono font-tabular text-xs font-bold text-foreground">
+   662→              {formatINR(estimatedTotal + estimatedBrokerage)}
+   663→            </span>
+   664→          </div>
+   665→        </div>
+   666→
+   667→        {/* Submit Button */}
+   668→        <button
+   669→          className={`w-full h-12 rounded-xl text-sm font-bold text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
+   670→            orderSide === 'buy'
+   671→              ? 'bg-[#00d09c] hover:bg-[#00b888] active:scale-[0.98]'
+   672→              : 'bg-[#eb5b3c] hover:bg-[#d14e31] active:scale-[0.98]'
+   673→          }`}
+   674→          onClick={handlePlaceOrder}
+   675→          disabled={placingOrder || !selectedStock}
+   676→        >
+   677→          {placingOrder ? (
+   678→            <span className="flex items-center justify-center gap-2">
+   679→              <Loader2 className="size-4 animate-spin" />
+   680→              Placing Order...
+   681→            </span>
+   682→          ) : (
+   683→            orderSide === 'buy' ? `Review Buy Order` : `Review Sell Order`
+   684→          )}
+   685→        </button>
+   686→
+   687→        {/* Account Info */}
+   688→        <div className="space-y-2 pt-3 border-t border-border">
+   689→          <div className="flex items-center justify-between">
+   690→            <span className="text-[10px] text-muted-foreground">Available Balance</span>
+   691→            <span className="font-mono font-tabular text-xs font-semibold text-foreground">
+   692→              {formatINR(availableBalance)}
+   693→            </span>
+   694→          </div>
+   695→          <div className="flex items-center justify-between">
+   696→            <span className="text-[10px] text-muted-foreground">Buying Power</span>
+   697→            <span className="font-mono font-tabular text-xs font-semibold text-foreground">
+   698→              {formatINR(Math.max(0, buyingPower))}
+   699→            </span>
+   700→          </div>
+   701→        </div>
+   702→      </CardContent>
+   703→
+   704→      {/* Trade Confirmation Modal */}
+   705→      <TradeConfirmModal
+   706→        open={confirmModalOpen}
+   707→        onClose={() => setConfirmModalOpen(false)}
+   708→        tradeData={confirmData}
+   709→        onConfirm={executeTrade}
+   710→        onSuccess={() => {
+   711→          useAppStore.getState().setCurrentPage('positions')
+   712→        }}
+   713→      />
+   714→    </Card>
+   715→  )
+   716→}
+   717→
+   718→// ─── Main Component ──────────────────────────────────────────────────────
+   719→
+   720→export function TradingPage() {
+   721→  const { token, user } = useAuthStore()
+   722→  const { setCurrentPage, navigateToStock, bumpTradeSignal } = useAppStore()
+   723→  const { showTradeSuccess } = useTradeSuccess()
+   724→  const { setSymbols: setWatchlistSymbols, loaded: watchlistLoaded } = useWatchlistStore()
+   725→
+   726→  // ── WebSocket Real-Time Data ──────────────────────────────────────────
+   727→  const { stocks: wsStockQuotes, status: wsStatus } = useStockData()
+   728→  const { derived } = useDerivedData()
+   729→  const wsPositions = usePositions()
+   730→
+   731→  // ── State ─────────────────────────────────────────────────────────────
+   732→  const [stocks, setStocks] = useState<TradeableStock[]>([])
+   733→  const [gainers, setGainers] = useState<TradeableStock[]>([])
+   734→  const [losers, setLosers] = useState<TradeableStock[]>([])
+   735→  const [selectedStock, setSelectedStock] = useState<TradeableStock | null>(null)
+   736→  const [positions, setPositions] = useState<Position[]>([])
+   737→  const [portfolio, setPortfolio] = useState<PortfolioData | null>(null)
+   738→
+   739→  const [loadingStocks, setLoadingStocks] = useState(true)
+   740→  const [loadingGainers, setLoadingGainers] = useState(true)
+   741→  const [loadingLosers, setLoadingLosers] = useState(true)
+   742→  const [apiError, setApiError] = useState(false)
+   743→
+   744→  const [activeTab, setActiveTab] = useState<StockTab>('all')
+   745→  const [searchQuery, setSearchQuery] = useState('')
+   746→  const [showOrderPanel, setShowOrderPanel] = useState(false)
+   747→  const [stockPage, setStockPage] = useState(1)
+   748→  const [totalStocks, setTotalStocks] = useState(0)
+   749→  const [loadingMore, setLoadingMore] = useState(false)
+   750→  const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+   751→
+   752→  // ── Fetch Stocks (with pagination, search, and sector filter) ──────
+   753→  const fetchStocks = useCallback(async (isBackgroundRefresh = false, page = 1, append = false) => {
+   754→    if (!token) { setLoadingStocks(false); return }
+   755→    if (!isBackgroundRefresh && !append) setLoadingStocks(true)
+   756→    if (append) setLoadingMore(true)
+   757→    setApiError(false)
+   758→    try {
+   759→      const params = new URLSearchParams()
+   760→      if (searchQuery.trim()) params.set('search', searchQuery.trim())
+   761→      if (activeTab !== 'all' && activeTab !== 'gainers' && activeTab !== 'losers') {
+   762→        if (activeTab === 'nifty50') {
+   763→          // Nifty 50 - just load top 50 by market cap
+   764→        } else if (activeTab === 'bankNifty') {
+   765→          params.set('sector', 'Banking')
+   766→        } else if (activeTab === 'fno') {
+   767→          params.set('fnoOnly', 'true')
+   768→        } else if (activeTab in sectorMap) {
+   769→          params.set('sector', sectorMap[activeTab])
+   770→        }
+   771→      }
+   772→      params.set('page', String(page))
+   773→      params.set('limit', '50')
+   774→
+   775→      const res = await fetch(`/api/stocks?${params.toString()}`)
+   776→      const data = await res.json()
+   777→      if (data.success && Array.isArray(data.data)) {
+   778→        if (append) {
+   779→          setStocks(prev => [...prev, ...data.data])
+   780→        } else {
+   781→          setStocks(data.data)
+   782→        }
+   783→        setTotalStocks(data.total || 0)
+   784→        if (data.data.length > 0 && !selectedStock && !append) {
+   785→          setSelectedStock(data.data[0])
+   786→        }
+   787→      } else {
+   788→        if (!isBackgroundRefresh && !append) setApiError(true)
+   789→      }
+   790→    } catch {
+   791→      if (!isBackgroundRefresh && !append) setApiError(true)
+   792→    } finally {
+   793→      if (!isBackgroundRefresh && !append) setLoadingStocks(false)
+   794→      setLoadingMore(false)
+   795→    }
+   796→  }, [token, searchQuery, activeTab, selectedStock])
+   797→
+   798→  // ── Fetch Gainers ────────────────────────────────────────────────────
+   799→  const fetchGainers = useCallback(async (isBackgroundRefresh = false) => {
+   800→    if (!isBackgroundRefresh) setLoadingGainers(true)
+   801→    try {
+   802→      const res = await fetch('/api/stocks/gainers')
+   803→      const data = await res.json()
+   804→      if (data.success && Array.isArray(data.data)) {
+   805→        setGainers(data.data)
+   806→      }
+   807→    } catch {
+   808→      // Silent - will show empty state
+   809→    } finally {
+   810→      if (!isBackgroundRefresh) setLoadingGainers(false)
+   811→    }
+   812→  }, [])
+   813→
+   814→  // ── Fetch Losers ─────────────────────────────────────────────────────
+   815→  const fetchLosers = useCallback(async (isBackgroundRefresh = false) => {
+   816→    if (!isBackgroundRefresh) setLoadingLosers(true)
+   817→    try {
+   818→      const res = await fetch('/api/stocks/losers')
+   819→      const data = await res.json()
+   820→      if (data.success && Array.isArray(data.data)) {
+   821→        setLosers(data.data)
+   822→      }
+   823→    } catch {
+   824→      // Silent - will show empty state
+   825→    } finally {
+   826→      if (!isBackgroundRefresh) setLoadingLosers(false)
+   827→    }
+   828→  }, [])
+   829→
+   830→  // ── Fetch Positions ──────────────────────────────────────────────────
+   831→  const fetchPositions = useCallback(async () => {
+   832→    if (!token) return
+   833→    try {
+   834→      const res = await fetch('/api/trade/positions', {
+   835→        headers: { Authorization: `Bearer ${token}` },
+   836→      })
+   837→      const data = await res.json()
+   838→      if (data.success && Array.isArray(data.data)) {
+   839→        setPositions(data.data)
+   840→      }
+   841→    } catch {
+   842→      // Silent
+   843→    }
+   844→  }, [token])
+   845→
+   846→  // ── Fetch Portfolio ──────────────────────────────────────────────────
+   847→  const fetchPortfolio = useCallback(async () => {
+   848→    if (!token) return
+   849→    try {
+   850→      const res = await fetch('/api/trade/portfolio', {
+   851→        headers: { Authorization: `Bearer ${token}` },
+   852→      })
+   853→      const data = await res.json()
+   854→      if (data.success && data.data) {
+   855→        setPortfolio(data.data)
+   856→      }
+   857→    } catch {
+   858→      // Silent
+   859→    }
+   860→  }, [token])
+   861→
+   862→  // ── Refresh After Trade ──────────────────────────────────────────────
+   863→  const refreshAfterTrade = useCallback(async () => {
+   864→    await Promise.all([fetchPositions(), fetchPortfolio()])
+   865→  }, [fetchPositions, fetchPortfolio])
+   866→
+   867→  // ── Select Stock Handler ─────────────────────────────────────────────
+   868→  const handleSelectStock = (stock: TradeableStock) => {
+   869→    setSelectedStock(stock)
+   870→    // Always navigate to Stock Overview page first (like Groww)
+   871→    // Users can then trade from the overview page
+   872→    navigateToStock(stock.symbol)
+   873→  }
+   874→
+   875→  // ── Effects ──────────────────────────────────────────────────────────
+   876→  // Fetch stocks when tab or search changes
+   877→  useEffect(() => {
+   878→    setStockPage(1)
+   879→    fetchStocks(false, 1, false)
+   880→  }, [activeTab])
+   881→
+   882→  // Debounced search - trigger API call after 300ms of inactivity
+   883→  useEffect(() => {
+   884→    if (searchTimeoutRef.current) {
+   885→      clearTimeout(searchTimeoutRef.current)
+   886→    }
+   887→    searchTimeoutRef.current = setTimeout(() => {
+   888→      setStockPage(1)
+   889→      fetchStocks(false, 1, false)
+   890→    }, 300)
+   891→    return () => {
+   892→      if (searchTimeoutRef.current) {
+   893→        clearTimeout(searchTimeoutRef.current)
+   894→      }
+   895→    }
+   896→  }, [searchQuery])
+   897→
+   898→  useEffect(() => {
+   899→    fetchGainers()
+   900→  }, [fetchGainers])
+   901→
+   902→  useEffect(() => {
+   903→    fetchLosers()
+   904→  }, [fetchLosers])
+   905→
+   906→  useEffect(() => {
+   907→    fetchPositions()
+   908→  }, [fetchPositions])
+   909→
+   910→  useEffect(() => {
+   911→    fetchPortfolio()
+   912→  }, [fetchPortfolio])
+   913→
+   914→  // WebSocket: Merge real-time stock price updates into existing stock data
+   915→  // This replaces the 2s polling - WebSocket pushes data every 500ms
+   916→  useEffect(() => {
+   917→    if (wsStatus !== 'connected' || Object.keys(wsStockQuotes).length === 0) return
+   918→
+   919→    setStocks(prev => prev.map(stock => {
+   920→      const wsQuote = wsStockQuotes[stock.symbol]
+   921→      if (!wsQuote || wsQuote.last_price <= 0) return stock
+   922→
+   923→      const previousClose = wsQuote.ohlc.close - wsQuote.net_change
+   924→      const changePercent = previousClose > 0 ? (wsQuote.net_change / previousClose) * 100 : stock.changePercent
+   925→
+   926→      return {
+   927→        ...stock,
+   928→        currentPrice: wsQuote.last_price,
+   929→        change: wsQuote.net_change,
+   930→        changePercent,
+   931→        volume: wsQuote.volume || stock.volume,
+   932→      }
+   933→    }))
+   934→
+   935→    // Also update gainers/losers with WS data
+   936→    setGainers(prev => prev.map(stock => {
+   937→      const wsQuote = wsStockQuotes[stock.symbol]
+   938→      if (!wsQuote || wsQuote.last_price <= 0) return stock
+   939→      const previousClose = wsQuote.ohlc.close - wsQuote.net_change
+   940→      const changePercent = previousClose > 0 ? (wsQuote.net_change / previousClose) * 100 : stock.changePercent
+   941→      return { ...stock, currentPrice: wsQuote.last_price, change: wsQuote.net_change, changePercent, volume: wsQuote.volume || stock.volume }
+   942→    }))
+   943→
+   944→    setLosers(prev => prev.map(stock => {
+   945→      const wsQuote = wsStockQuotes[stock.symbol]
+   946→      if (!wsQuote || wsQuote.last_price <= 0) return stock
+   947→      const previousClose = wsQuote.ohlc.close - wsQuote.net_change
+   948→      const changePercent = previousClose > 0 ? (wsQuote.net_change / previousClose) * 100 : stock.changePercent
+   949→      return { ...stock, currentPrice: wsQuote.last_price, change: wsQuote.net_change, changePercent, volume: wsQuote.volume || stock.volume }
+   950→    }))
+   951→
+   952→    // Update selected stock if it's in the WS data
+   953→    setSelectedStock(prev => {
+   954→      if (!prev) return prev
+   955→      const wsQuote = wsStockQuotes[prev.symbol]
+   956→      if (!wsQuote || wsQuote.last_price <= 0) return prev
+   957→      const previousClose = wsQuote.ohlc.close - wsQuote.net_change
+   958→      const changePercent = previousClose > 0 ? (wsQuote.net_change / previousClose) * 100 : prev.changePercent
+   959→      return { ...prev, currentPrice: wsQuote.last_price, change: wsQuote.net_change, changePercent, volume: wsQuote.volume || prev.volume }
+   960→    })
+   961→  }, [wsStockQuotes, wsStatus])
+   962→
+   963→  // ── WS: Update gainers from derived data (zero polling) ──────────────
+   964→  useEffect(() => {
+   965→    if (derived?.gainers?.length) {
+   966→      setGainers(derived.gainers.map(g => ({
+   967→        id: g.symbol,
+   968→        symbol: g.symbol, name: g.name,
+   969→        currentPrice: g.currentPrice, change: g.change,
+   970→        changePercent: g.changePercent, volume: g.volume ?? 0,
+   971→        sector: '', lotSize: 0, isFnoBan: false,
+   972→        isFuturesAvailable: false, isOptionsAvailable: false,
+   973→        marketCap: 0, week52High: 0, week52Low: 0,
+   974→        peRatio: null,
+   975→      })))
+   976→    }
+   977→  }, [derived?.gainers])
+   978→
+   979→  // ── WS: Update losers from derived data (zero polling) ────────────────
+   980→  useEffect(() => {
+   981→    if (derived?.losers?.length) {
+   982→      setLosers(derived.losers.map(l => ({
+   983→        id: l.symbol,
+   984→        symbol: l.symbol, name: l.name,
+   985→        currentPrice: l.currentPrice, change: l.change,
+   986→        changePercent: l.changePercent, volume: l.volume ?? 0,
+   987→        sector: '', lotSize: 0, isFnoBan: false,
+   988→        isFuturesAvailable: false, isOptionsAvailable: false,
+   989→        marketCap: 0, week52High: 0, week52Low: 0,
+   990→        peRatio: null,
+   991→      })))
+   992→    }
+   993→  }, [derived?.losers])
+   994→
+   995→  // ── WS: Update positions from WebSocket (zero polling) ────────────────
+   996→  useEffect(() => {
+   997→    if (wsPositions.length > 0) {
+   998→      setPositions(wsPositions.map(p => ({
+   999→        id: p.positionId,
+  1000→        segment: p.segment,
+  1001→        productType: '',
+  1002→        tradeDirection: p.tradeDirection,
+  1003→        symbol: p.symbol,
+  1004→        quantity: 0,
+  1005→        entryPrice: 0,
+  1006→        currentPrice: p.currentPrice,
+  1007→        totalInvested: 0,
+  1008→        currentValue: 0,
+  1009→        unrealizedPnl: p.unrealizedPnl,
+  1010→        unrealizedPnlPercent: p.unrealizedPnlPercent,
+  1011→        marginUsed: 0,
+  1012→        isOpen: p.isOpen,
+  1013→        createdAt: '',
+  1014→      })))
+  1015→      // Also update portfolio P&L
+  1016→      const totalPnl = wsPositions.reduce((sum, p) => sum + p.unrealizedPnl, 0)
+  1017→      setPortfolio(prev => prev ? { ...prev, totalUnrealizedPnl: totalPnl } : prev)
+  1018→    }
+  1019→  }, [wsPositions])
+  1020→
+  1021→  // Load watchlist symbols into shared store on mount
+  1022→  useEffect(() => {
+  1023→    if (!token || watchlistLoaded) return
+  1024→    fetch('/api/trade/watchlist', {
+  1025→      headers: { Authorization: `Bearer ${token}` },
+  1026→    })
+  1027→      .then(res => res.json())
+  1028→      .then(data => {
+  1029→        if (data.success && Array.isArray(data.data)) {
+  1030→          setWatchlistSymbols(data.data.map((item: { symbol: string }) => item.symbol))
+  1031→        }
+  1032→      })
+  1033→      .catch(() => { /* silent */ })
+  1034→  }, [token, watchlistLoaded, setWatchlistSymbols])
+  1035→
+  1036→  // ── Display Stocks ──────────────────────────────────────────────────
+  1037→  const displayStocks = useMemo(() => {
+  1038→    // For gainers/losers tabs, use the separate gainers/losers data
+  1039→    if (activeTab === 'gainers') return gainers
+  1040→    if (activeTab === 'losers') return losers
+  1041→
+  1042→    // For all other tabs (all, nifty50, bankNifty, fno, sector tabs),
+  1043→    // the API already returned the filtered/paginated results in `stocks`
+  1044→    // Only filter Nifty50 client-side since it's a specific symbol set
+  1045→    if (activeTab === 'nifty50') {
+  1046→      return stocks.filter((s) => NIFTY50_SYMBOLS.has(s.symbol))
+  1047→    }
+  1048→
+  1049→    return stocks
+  1050→  }, [stocks, gainers, losers, activeTab])
+  1051→
+  1052→  // ── Has More Stocks for Pagination ──────────────────────────────────
+  1053→  const hasMore = useMemo(() => {
+  1054→    if (activeTab === 'gainers' || activeTab === 'losers') return false
+  1055→    if (activeTab === 'nifty50') return false
+  1056→    return stocks.length < totalStocks
+  1057→  }, [stocks.length, totalStocks, activeTab])
+  1058→
+  1059→  // ── Loading state for current tab ────────────────────────────────────
+  1060→  const isCurrentTabLoading = useMemo(() => {
+  1061→    switch (activeTab) {
+  1062→      case 'gainers':
+  1063→        return loadingGainers
+  1064→      case 'losers':
+  1065→        return loadingLosers
+  1066→      default:
+  1067→        return loadingStocks
+  1068→    }
+  1069→  }, [activeTab, loadingStocks, loadingGainers, loadingLosers])
+  1070→
+  1071→  // ── Market summary stats ─────────────────────────────────────────────
+  1072→  const marketStats = useMemo(() => {
+  1073→    const advancing = stocks.filter((s) => s.changePercent > 0).length
+  1074→    const declining = stocks.filter((s) => s.changePercent < 0).length
+  1075→    const unchanged = stocks.filter((s) => s.changePercent === 0).length
+  1076→    return { advancing, declining, unchanged, total: totalStocks }
+  1077→  }, [stocks, totalStocks])
+  1078→
+  1079→  return (
+  1080→    <div className="min-h-screen bg-background">
+  1081→      {/* ═══ Header ═════════════════════════════════════════════════════════ */}
+  1082→      <motion.div
+  1083→        initial={{ opacity: 0, y: -10 }}
+  1084→        animate={{ opacity: 1, y: 0 }}
+  1085→        transition={{ duration: 0.4 }}
+  1086→        className="bg-card border-b border-border sticky top-0 z-30"
+  1087→      >
+  1088→        <div className="px-4 sm:px-6 lg:px-8 py-4">
+  1089→          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+  1090→            <div className="flex items-center gap-3">
+  1091→              <div>
+  1092→                <div className="flex items-center gap-2">
+  1093→                  <h1 className="text-2xl sm:text-3xl font-bold text-foreground tracking-tight">
+  1094→                    Stocks
+  1095→                  </h1>
+  1096→                  {wsStatus === 'connected' && (
+  1097→                    <span className="flex items-center gap-1 text-[9px] font-bold bg-[#00D09C]/10 text-[#00D09C] px-2 py-0.5 rounded-full">
+  1098→                      <Zap className="size-2.5" />
+  1099→                      LIVE
+  1100→                    </span>
+  1101→                  )}
+  1102→                </div>
+  1103→                <p className="text-xs text-muted-foreground mt-0.5">
+  1104→                  Browse and trade Indian equities
+  1105→                </p>
+  1106→              </div>
+  1107→            </div>
+  1108→            <div className="flex items-center gap-3">
+  1109→              {/* Search bar */}
+  1110→              <div className="relative flex-1 sm:flex-none">
+  1111→                <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+  1112→                <Input
+  1113→                  placeholder="Search stocks..."
+  1114→                  value={searchQuery}
+  1115→                  onChange={(e) => setSearchQuery(e.target.value)}
+  1116→                  className="pl-9 h-10 w-full sm:w-72 bg-background border-border text-sm text-foreground placeholder:text-muted-foreground focus:ring-[#00D09C]/20 focus:border-[#00D09C] rounded-xl"
+  1117→                />
+  1118→              </div>
+  1119→              {/* Refresh button */}
+  1120→              <Button
+  1121→                variant="outline"
+  1122→                size="sm"
+  1123→                className="h-10 w-10 p-0 rounded-xl border-border text-muted-foreground hover:text-[#00D09C] hover:border-[#00D09C]/30"
+  1124→                onClick={() => {
+  1125→                  setStockPage(1)
+  1126→                  fetchStocks(false, 1, false)
+  1127→                  fetchGainers()
+  1128→                  fetchLosers()
+  1129→                }}
+  1130→              >
+  1131→                <RefreshCw className="size-4" />
+  1132→              </Button>
+  1133→            </div>
+  1134→          </div>
+  1135→
+  1136→          {/* Market stats bar */}
+  1137→          {!loadingStocks && stocks.length > 0 && (
+  1138→            <div className="flex items-center gap-4 mt-3 text-[11px] font-semibold">
+  1139→              <span className="flex items-center gap-1 text-[#00B386]">
+  1140→                <TrendingUp className="size-3" />
+  1141→                {marketStats.advancing} Advancing
+  1142→              </span>
+  1143→              <span className="flex items-center gap-1 text-[#EB5B3C]">
+  1144→                <TrendingDown className="size-3" />
+  1145→                {marketStats.declining} Declining
+  1146→              </span>
+  1147→              <span className="text-muted-foreground">
+  1148→                {marketStats.unchanged} Unchanged
+  1149→              </span>
+  1150→              <span className="text-muted-foreground ml-auto">
+  1151→                {marketStats.total} stocks
+  1152→              </span>
+  1153→            </div>
+  1154→          )}
+  1155→        </div>
+  1156→
+  1157→        {/* Tab filters */}
+  1158→        <div className="px-4 sm:px-6 lg:px-8 pb-3">
+  1159→          <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
+  1160→            {tabs.map((tab, idx) => (
+  1161→              <React.Fragment key={tab.id}>
+  1162→                {idx === 6 && (
+  1163→                  <span className="shrink-0 w-px h-5 bg-border mx-1" />
+  1164→                )}
+  1165→                <button
+  1166→                  onClick={() => setActiveTab(tab.id)}
+  1167→                  className={`shrink-0 px-4 py-2 rounded-full text-xs font-bold transition-all ${
+  1168→                    activeTab === tab.id
+  1169→                      ? 'bg-[#00D09C] text-white shadow-sm shadow-[#00D09C]/20'
+  1170→                      : 'bg-background text-muted-foreground hover:bg-accent hover:text-foreground'
+  1171→                  }`}
+  1172→                >
+  1173→                  {tab.label}
+  1174→                  {tab.id === 'gainers' && gainers.length > 0 && (
+  1175→                    <span className={`ml-1 text-[10px] ${activeTab === tab.id ? 'text-white/70' : 'text-[#00B386]'}`}>
+  1176→                      +{gainers.length}
+  1177→                    </span>
+  1178→                  )}
+  1179→                  {tab.id === 'losers' && losers.length > 0 && (
+  1180→                    <span className={`ml-1 text-[10px] ${activeTab === tab.id ? 'text-white/70' : 'text-[#EB5B3C]'}`}>
+  1181→                      {losers.length}
+  1182→                    </span>
+  1183→                  )}
+  1184→                </button>
+  1185→              </React.Fragment>
+  1186→            ))}
+  1187→          </div>
+  1188→        </div>
+  1189→      </motion.div>
+  1190→
+  1191→      {/* ═══ Main Content ═════════════════════════════════════════════════ */}
+  1192→      <div className="px-4 sm:px-6 lg:px-8 py-6">
+  1193→        {/* API Error State */}
+  1194→        {apiError && !loadingStocks && (
+  1195→          <motion.div
+  1196→            initial={{ opacity: 0, y: 10 }}
+  1197→            animate={{ opacity: 1, y: 0 }}
+  1198→            className="mb-6"
+  1199→          >
+  1200→            <Card className="bg-card border border-[#eb5b3c]/20 rounded-xl shadow-sm">
+  1201→              <CardContent className="p-6 flex flex-col items-center justify-center text-center">
+  1202→                <div className="size-14 rounded-full bg-[#EB5B3C]/10 flex items-center justify-center mb-4">
+  1203→                  <AlertCircle className="size-7 text-[#EB5B3C]" />
+  1204→                </div>
+  1205→                <p className="text-foreground font-bold text-base">Markets data unavailable</p>
+  1206→                <p className="text-muted-foreground text-sm mt-1 max-w-md">
+  1207→                  We couldn&apos;t connect to the market data service. Please check your connection and try again.
+  1208→                </p>
+  1209→                <Button
+  1210→                  size="sm"
+  1211→                  className="mt-4 gap-1.5 bg-[#00D09C] hover:bg-[#00b88a] text-white font-semibold rounded-lg"
+  1212→                  onClick={() => {
+  1213→                    setStockPage(1)
+  1214→                    fetchStocks(false, 1, false)
+  1215→                    fetchGainers()
+  1216→                    fetchLosers()
+  1217→                  }}
+  1218→                >
+  1219→                  <RefreshCw className="size-3.5" />
+  1220→                  Retry
+  1221→                </Button>
+  1222→              </CardContent>
+  1223→            </Card>
+  1224→          </motion.div>
+  1225→        )}
+  1226→
+  1227→        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+  1228→          {/* ── Stock List - Left 2/3 ────────────────────────────────────── */}
+  1229→          <div className="lg:col-span-2">
+  1230→            <Card className="bg-card border border-border rounded-xl shadow-sm overflow-hidden">
+  1231→              {/* Table header */}
+  1232→              <div className="flex items-center justify-between px-5 py-3 bg-card border-b border-border">
+  1233→                <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+  1234→                  Instrument
+  1235→                </span>
+  1236→                <div className="flex items-center gap-3 sm:gap-4">
+  1237→                  <span className="hidden md:inline text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+  1238→                    Sector
+  1239→                  </span>
+  1240→                  <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider text-right min-w-[90px]">
+  1241→                    LTP
+  1242→                  </span>
+  1243→                  <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider min-w-[72px] text-center">
+  1244→                    Change
+  1245→                  </span>
+  1246→                </div>
+  1247→              </div>
+  1248→
+  1249→              {/* Stock rows */}
+  1250→              <AnimatePresence mode="wait">
+  1251→                {isCurrentTabLoading ? (
+  1252→                  <motion.div
+  1253→                    key="loading"
+  1254→                    initial={{ opacity: 0 }}
+  1255→                    animate={{ opacity: 1 }}
+  1256→                    exit={{ opacity: 0 }}
+  1257→                  >
+  1258→                    {Array.from({ length: 8 }).map((_, i) => (
+  1259→                      <SkeletonRow key={i} />
+  1260→                    ))}
+  1261→                  </motion.div>
+  1262→                ) : displayStocks.length === 0 ? (
+  1263→                  <motion.div
+  1264→                    key="empty"
+  1265→                    initial={{ opacity: 0, y: 10 }}
+  1266→                    animate={{ opacity: 1, y: 0 }}
+  1267→                    exit={{ opacity: 0 }}
+  1268→                    className="flex flex-col items-center justify-center py-16 text-center"
+  1269→                  >
+  1270→                    <div className="size-14 rounded-full bg-background flex items-center justify-center mb-4">
+  1271→                      {searchQuery ? (
+  1272→                        <Search className="size-7 text-muted-foreground/40" />
+  1273→                      ) : activeTab === 'gainers' ? (
+  1274→                        <TrendingUp className="size-7 text-muted-foreground/40" />
+  1275→                      ) : activeTab === 'losers' ? (
+  1276→                        <TrendingDown className="size-7 text-muted-foreground/40" />
+  1277→                      ) : (
+  1278→                        <AlertCircle className="size-7 text-muted-foreground/40" />
+  1279→                      )}
+  1280→                    </div>
+  1281→                    <p className="text-foreground font-semibold text-sm">
+  1282→                      {searchQuery
+  1283→                        ? 'No stocks match your search'
+  1284→                        : activeTab === 'gainers'
+  1285→                          ? 'No gainers found'
+  1286→                          : activeTab === 'losers'
+  1287→                            ? 'No losers found'
+  1288→                            : 'No stocks found'}
+  1289→                    </p>
+  1290→                    <p className="text-muted-foreground text-xs mt-1">
+  1291→                      {searchQuery
+  1292→                        ? 'Try a different search term'
+  1293→                        : 'Market data may be temporarily unavailable'}
+  1294→                    </p>
+  1295→                  </motion.div>
+  1296→                ) : (
+  1297→                  <div className="max-h-[calc(100vh-280px)] overflow-y-auto"
+  1298→                    style={{
+  1299→                      scrollbarWidth: 'thin',
+  1300→                      scrollbarColor: 'var(--border) transparent',
+  1301→                    }}
+  1302→                  >
+  1303→                    <motion.div
+  1304→                      key={`list-${activeTab}`}
+  1305→                      initial={{ opacity: 0 }}
+  1306→                      animate={{ opacity: 1 }}
+  1307→                      exit={{ opacity: 0 }}
+  1308→                    >
+  1309→                      {displayStocks.map((stock, index) => (
+  1310→                        <motion.div
+  1311→                          key={stock.id || stock.symbol}
+  1312→                          initial={{ opacity: 0, y: 8 }}
+  1313→                          animate={{ opacity: 1, y: 0 }}
+  1314→                          transition={{ delay: Math.min(index * 0.02, 0.4), duration: 0.3 }}
+  1315→                        >
+  1316→                          <StockRow
+  1317→                            stock={stock}
+  1318→                            onClick={() => handleSelectStock(stock)}
+  1319→                          />
+  1320→                        </motion.div>
+  1321→                      ))}
+  1322→                    </motion.div>
+  1323→                    {/* Load More Button */}
+  1324→                    {hasMore && (
+  1325→                      <div className="flex justify-center py-4 border-t border-border">
+  1326→                        <Button
+  1327→                          variant="ghost"
+  1328→                          className="gap-1.5 text-[#00D09C] hover:text-[#00b88a] hover:bg-[#00D09C]/5 font-semibold text-sm"
+  1329→                          disabled={loadingMore}
+  1330→                          onClick={() => {
+  1331→                            const nextPage = stockPage + 1
+  1332→                            setStockPage(nextPage)
+  1333→                            fetchStocks(false, nextPage, true)
+  1334→                          }}
+  1335→                        >
+  1336→                          {loadingMore ? (
+  1337→                            <>
+  1338→                              <Loader2 className="size-4 animate-spin" />
+  1339→                              Loading...
+  1340→                            </>
+  1341→                          ) : (
+  1342→                            <>
+  1343→                              <ChevronDown className="size-4" />
+  1344→                              Load More ({totalStocks - stocks.length} remaining)
+  1345→                            </>
+  1346→                          )}
+  1347→                        </Button>
+  1348→                      </div>
+  1349→                    )}
+  1350→                  </div>
+  1351→                )}
+  1352→              </AnimatePresence>
+  1353→            </Card>
+  1354→          </div>
+  1355→
+  1356→          {/* ── Order Panel - Right 1/3 ──────────────────────────────────── */}
+  1357→          <div className="hidden lg:block">
+  1358→            <div className="sticky top-[140px]">
+  1359→              <OrderPanel
+  1360→                selectedStock={selectedStock}
+  1361→                token={token}
+  1362→                onTradeSuccess={refreshAfterTrade}
+  1363→                portfolio={portfolio}
+  1364→                user={user}
+  1365→              />
+  1366→            </div>
+  1367→          </div>
+  1368→        </div>
+  1369→
+  1370→        {/* ── Mobile Order Panel Overlay ────────────────────────────────── */}
+  1371→        <AnimatePresence>
+  1372→          {showOrderPanel && selectedStock && (
+  1373→            <motion.div
+  1374→              initial={{ opacity: 0 }}
+  1375→              animate={{ opacity: 1 }}
+  1376→              exit={{ opacity: 0 }}
+  1377→              className="fixed inset-0 z-50 bg-black/50 lg:hidden"
+  1378→              onClick={() => setShowOrderPanel(false)}
+  1379→            >
+  1380→              <motion.div
+  1381→                initial={{ y: '100%' }}
+  1382→                animate={{ y: 0 }}
+  1383→                exit={{ y: '100%' }}
+  1384→                transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+  1385→                className="absolute bottom-0 left-0 right-0 max-h-[85vh] overflow-y-auto bg-background rounded-t-2xl"
+  1386→                onClick={(e) => e.stopPropagation()}
+  1387→              >
+  1388→                <div className="sticky top-0 bg-card border-b border-border px-4 py-3 flex items-center justify-between rounded-t-2xl z-10">
+  1389→                  <span className="font-bold text-foreground">Place Order</span>
+  1390→                  <button
+  1391→                    className="size-8 rounded-full flex items-center justify-center hover:bg-background text-muted-foreground"
+  1392→                    onClick={() => setShowOrderPanel(false)}
+  1393→                  >
+  1394→                    ✕
+  1395→                  </button>
+  1396→                </div>
+  1397→                <div className="p-4">
+  1398→                  <OrderPanel
+  1399→                    selectedStock={selectedStock}
+  1400→                    token={token}
+  1401→                    onTradeSuccess={async () => {
+  1402→                      await refreshAfterTrade()
+  1403→                      setShowOrderPanel(false)
+  1404→                    }}
+  1405→                    portfolio={portfolio}
+  1406→                    user={user}
+  1407→                  />
+  1408→                </div>
+  1409→              </motion.div>
+  1410→            </motion.div>
+  1411→          )}
+  1412→        </AnimatePresence>
+  1413→
+  1414→        {/* ── Open Positions Quick View ─────────────────────────────────── */}
+  1415→        {positions.length > 0 && (
+  1416→          <motion.div
+  1417→            initial={{ opacity: 0, y: 20 }}
+  1418→            animate={{ opacity: 1, y: 0 }}
+  1419→            transition={{ delay: 0.3 }}
+  1420→            className="mt-6"
+  1421→          >
+  1422→            <Card className="bg-card border border-border rounded-xl shadow-sm">
+  1423→              <CardContent className="p-6">
+  1424→                <div className="flex items-center justify-between mb-4">
+  1425→                  <h3 className="text-lg font-semibold text-foreground">Open Positions</h3>
+  1426→                  <Button
+  1427→                    variant="ghost"
+  1428→                    size="sm"
+  1429→                    className="text-[#00D09C] text-xs font-bold hover:underline px-0"
+  1430→                    onClick={() => setCurrentPage('positions')}
+  1431→                  >
+  1432→                    VIEW ALL
+  1433→                  </Button>
+  1434→                </div>
+  1435→                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+  1436→                  {positions.slice(0, 3).map((pos) => {
+  1437→                    const isPositive = pos.unrealizedPnl >= 0
+  1438→                    return (
+  1439→                      <div
+  1440→                        key={pos.id}
+  1441→                        className="flex items-center justify-between p-3 rounded-xl bg-background border border-border"
+  1442→                      >
+  1443→                        <div className="min-w-0">
+  1444→                          <span className="font-bold text-sm text-foreground">{pos.symbol}</span>
+  1445→                          <p className="text-[10px] text-muted-foreground mt-0.5">
+  1446→                            {pos.tradeDirection === 'BUY' ? 'Long' : 'Short'} • {pos.quantity} qty
+  1447→                          </p>
+  1448→                        </div>
+  1449→                        <div className="text-right">
+  1450→                          <span className={`text-sm font-bold font-mono font-tabular ${
+  1451→                            isPositive ? 'text-[#00B386]' : 'text-[#EB5B3C]'
+  1452→                          }`}>
+  1453→                            {isPositive ? '+' : ''}{formatINR(pos.unrealizedPnl)}
+  1454→                          </span>
+  1455→                          <p className={`text-[10px] font-medium ${
+  1456→                            isPositive ? 'text-[#00B386]' : 'text-[#EB5B3C]'
+  1457→                          }`}>
+  1458→                            {formatPercent(pos.unrealizedPnlPercent)}
+  1459→                          </p>
+  1460→                        </div>
+  1461→                      </div>
+  1462→                    )
+  1463→                  })}
+  1464→                </div>
+  1465→              </CardContent>
+  1466→            </Card>
+  1467→          </motion.div>
+  1468→        )}
+  1469→      </div>
+  1470→
+  1471→      {/* ═══ Floating Buy/Sell Bar (Mobile) ══════════════════════════════ */}
+  1472→      {selectedStock && !showOrderPanel && (
+  1473→        <div className="fixed bottom-16 left-0 right-0 z-40 lg:hidden px-4 pb-3">
+  1474→          <motion.div
+  1475→            initial={{ y: 60, opacity: 0 }}
+  1476→            animate={{ y: 0, opacity: 1 }}
+  1477→            exit={{ y: 60, opacity: 0 }}
+  1478→            transition={{ type: 'spring', stiffness: 260, damping: 24 }}
+  1479→            className="flex gap-2"
+  1480→          >
+  1481→            <Button
+  1482→              className="flex-1 h-12 bg-[#00D09C] hover:bg-[#00b88a] text-white font-bold rounded-xl text-sm gap-1.5 shadow-lg"
+  1483→              onClick={() => setShowOrderPanel(true)}
+  1484→            >
+  1485→              <ShoppingCart className="size-4" />
+  1486→              Buy {selectedStock.symbol}
+  1487→            </Button>
+  1488→            <Button
+  1489→              className="flex-1 h-12 bg-[#EB5B3C] hover:bg-[#d44f33] text-white font-bold rounded-xl text-sm gap-1.5 shadow-lg"
+  1490→              onClick={() => setShowOrderPanel(true)}
+  1491→            >
+  1492→              Sell {selectedStock.symbol}
+  1493→            </Button>
+  1494→          </motion.div>
+  1495→        </div>
+  1496→      )}
+  1497→    </div>
+  1498→  )
+  1499→}
+  1500→

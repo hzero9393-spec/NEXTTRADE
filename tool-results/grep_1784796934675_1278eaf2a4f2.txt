@@ -1,0 +1,252 @@
+/home/z/my-project/src/components/nexttrade/watchlist-sidebar.tsx:20:import { StockLogo } from '@/components/pepertect/ui/stock-logo'
+/home/z/my-project/src/components/nexttrade/watchlist-sidebar.tsx:181:                  style={{ background: 'linear-gradient(135deg, #00D09C 0%, #00A67E 100%)' }}
+/home/z/my-project/src/components/nexttrade/watchlist-sidebar.tsx:210:                  className="flex size-7 items-center justify-center rounded-lg text-muted-foreground hover:text-[#00D09C] hover:bg-[#00D09C]/5 transition-all"
+/home/z/my-project/src/components/nexttrade/watchlist-sidebar.tsx:251:                      className="mt-4 flex items-center gap-1.5 text-[11px] font-semibold text-[#00D09C] hover:text-[#00b88a] transition-colors"
+/home/z/my-project/src/components/nexttrade/watchlist-sidebar.tsx:352:                  className="flex items-center justify-center gap-1.5 w-full text-[11px] font-semibold text-[#00D09C] hover:text-[#00b88a] transition-colors py-1.5 rounded-lg hover:bg-[#00D09C]/5"
+/home/z/my-project/src/components/nexttrade/pages/active-devices-page.tsx:225:            <div className="size-9 rounded-lg bg-[#00D09C]/10 flex items-center justify-center">
+/home/z/my-project/src/components/nexttrade/pages/active-devices-page.tsx:226:              <MonitorSmartphone className="size-5 text-[#00D09C]" />
+/home/z/my-project/src/components/nexttrade/pages/active-devices-page.tsx:242:                <div className="size-10 rounded-full bg-[#00D09C] flex items-center justify-center ring-2 ring-white">
+/home/z/my-project/src/components/nexttrade/pages/active-devices-page.tsx:308:              <div className="bg-card border-2 border-[#00D09C]/20 rounded-2xl shadow-sm overflow-hidden">
+/home/z/my-project/src/components/nexttrade/pages/active-devices-page.tsx:312:                      <div className="size-2 rounded-full bg-[#00D09C] animate-pulse" />
+/home/z/my-project/src/components/nexttrade/pages/active-devices-page.tsx:313:                      <span className="text-xs font-bold text-[#00D09C] uppercase tracking-wider">Current Device</span>
+/home/z/my-project/src/components/nexttrade/pages/active-devices-page.tsx:315:                    <Badge className="bg-[#00D09C]/10 text-[#00D09C] border-0 text-[10px] px-2 py-0.5 font-bold">
+/home/z/my-project/src/components/nexttrade/pages/active-devices-page.tsx:329:                          : "bg-[#00D09C]/10"
+/home/z/my-project/src/components/nexttrade/pages/active-devices-page.tsx:336:                        <Monitor className="size-7 text-[#00D09C]" />
+/home/z/my-project/src/components/nexttrade/pages/active-devices-page.tsx:358:                          <MapPin className="size-3.5 shrink-0 text-[#00D09C]" />
+/home/z/my-project/src/components/nexttrade/pages/active-devices-page.tsx:544:                  <Shield className="size-7 text-[#00D09C]" />
+/home/z/my-project/src/components/nexttrade/pages/positions-page.tsx:43:  () => import('@/components/pepertect/ui/strike-overview-drawer').then(m => ({ default: m.StrikeOverviewDrawer })),
+/home/z/my-project/src/components/nexttrade/pages/positions-page.tsx:214:                className="font-bold text-[15px] text-foreground truncate hover:text-[#00D09C] transition-colors text-left"
+/home/z/my-project/src/components/nexttrade/pages/positions-page.tsx:246:                className="text-[#00D09C] font-semibold hover:underline"
+/home/z/my-project/src/components/nexttrade/pages/positions-page.tsx:309:            className="rounded-lg px-3 py-1.5 text-[11px] font-semibold active:scale-95 transition-all border-[#00D09C]/30 text-[#00D09C] bg-transparent hover:bg-[#00D09C] hover:text-white hover:border-[#00D09C]"
+/home/z/my-project/src/components/nexttrade/pages/positions-page.tsx:433:          className="rounded-lg px-3 py-1.5 text-[11px] font-semibold active:scale-95 transition-all border-[#00D09C]/30 text-[#00D09C] bg-transparent hover:bg-[#00D09C] hover:text-white hover:border-[#00D09C]"
+/home/z/my-project/src/components/nexttrade/pages/positions-page.tsx:610:          className="flex-1 h-9 rounded-lg text-[11px] font-bold bg-[#00D09C] hover:bg-[#00b386] text-white disabled:opacity-40 disabled:cursor-not-allowed transition-all active:scale-[0.98]"
+/home/z/my-project/src/components/nexttrade/pages/positions-page.tsx:1339:                activeTab === 'open' ? 'bg-[#00D09C]/10 text-[#00D09C]' : 'bg-muted-foreground/10 text-muted-foreground'
+/home/z/my-project/src/components/nexttrade/pages/positions-page.tsx:1367:                ? 'bg-[#00D09C]/10 text-[#00D09C] border border-[#00D09C]/20'
+/home/z/my-project/src/components/nexttrade/pages/positions-page.tsx:1376:                ? 'bg-[#00D09C]/15 text-[#00D09C]'
+/home/z/my-project/src/components/nexttrade/pages/positions-page.tsx:1385:                ? 'bg-[#00D09C]/10 text-[#00D09C] border border-[#00D09C]/20'
+/home/z/my-project/src/components/nexttrade/pages/positions-page.tsx:1394:                ? 'bg-[#00D09C]/15 text-[#00D09C]'
+/home/z/my-project/src/components/nexttrade/pages/positions-page.tsx:1439:                className="mt-6 gap-1.5 bg-[#00D09C] hover:bg-[#00b88a] text-white font-semibold rounded-xl px-5"
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:313:      const saved = localStorage.getItem('pepertect_settings')
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:348:      localStorage.setItem('pepertect_settings', JSON.stringify(newSettings))
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:708:        last: `pepertect-last-trade-${new Date().toISOString().split('T')[0]}.pdf`,
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:709:        monthly: `pepertect-monthly-report-${new Date().toISOString().split('T')[0]}.pdf`,
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:710:        full: `pepertect-full-report-${new Date().toISOString().split('T')[0]}.pdf`,
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:796:                <div className="h-1.5 bg-gradient-to-r from-[#00D09C] via-[#00D09C] to-[#5367ff]" />
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:802:                      <div className="size-20 rounded-full bg-[#00D09C] flex items-center justify-center ring-4 ring-[#00D09C]/10 overflow-hidden">
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:837:                        <Loader2 className="size-3.5 animate-spin text-[#00D09C]" />
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:838:                        <span className="text-xs text-[#00D09C] font-medium">Uploading...</span>
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:851:                  <div className="rounded-xl p-4 mb-5 bg-[#e6faf4] border border-[#00D09C]/15">
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:855:                        <p className="text-2xl font-bold text-[#00D09C] mt-1">{formatINRWhole(availableBalance)}</p>
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:867:                      className="flex-1 gap-2 text-sm font-semibold h-10 bg-[#00D09C] hover:bg-[#00b888] text-white border-0 shadow-sm"
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:906:                        <Badge className="border-0 text-[10px] font-semibold px-1.5 py-0 bg-[#e6faf4] text-[#00D09C]">
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:921:                        <Badge className="border-0 text-[10px] font-semibold px-1.5 py-0 bg-[#e6faf4] text-[#00D09C]">
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:977:                    <Wallet className="size-4 text-[#00D09C]" />
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:981:                <p className="text-xl font-bold text-[#00D09C]">{formatINRWhole(availableBalance)}</p>
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:998:                isProfit ? 'border border-[#00D09C]/25' : 'border border-[#eb5b3c]/25'
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:1002:                    {isProfit ? <TrendingUp className="size-4 text-[#00D09C]" /> : <TrendingDown className="size-4 text-[#EB5B3C]" />}
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:1006:                <p className={cn('text-xl font-bold', isProfit ? 'text-[#00D09C]' : 'text-[#EB5B3C]')}>
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:1015:                className="gap-2 text-sm font-semibold h-10 bg-[#00D09C] hover:bg-[#00b888] text-white border-0 shadow-sm"
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:1035:                  <Crown className="size-5 text-[#00D09C]" />
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:1046:                        user?.subscription === 'PREMIUM' ? 'bg-[#e6faf4] text-[#00D09C]' : 'bg-muted text-muted-foreground'
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:1055:                          <Check className="size-3.5 shrink-0 text-[#00D09C]" />
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:1063:                      className="gap-2 text-sm font-semibold h-10 px-5 bg-[#00D09C] hover:bg-[#00b888] text-white border-0 shadow-sm"
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:1079:                  <Settings className="size-5 text-[#00D09C]" />
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:1088:                      <Shield className="size-4 text-[#00D09C]" />
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:1210:                    <Trophy className="size-5 text-[#00D09C]" />
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:1237:                      <Target className="size-4 text-[#00D09C]" />
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:1240:                    <p className={cn('text-xl font-bold', winRate >= 50 ? 'text-[#00D09C]' : 'text-[#EB5B3C]')}>
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:1248:                      {isProfit ? <TrendingUp className="size-4 text-[#00D09C]" /> : <TrendingDown className="size-4 text-[#EB5B3C]" />}
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:1251:                    <p className={cn('text-xl font-bold', isProfit ? 'text-[#00D09C]' : 'text-[#EB5B3C]')}>
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:1262:                    <p className={cn('text-xl font-bold', bestTradePnl >= 0 ? 'text-[#00D09C]' : 'text-[#EB5B3C]')}>
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:1276:                  <FileBarChart className="size-5 text-[#00D09C]" />
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:1286:                    className="flex items-center gap-3 p-4 rounded-xl border border-border bg-card hover:bg-[#e6faf4] hover:border-[#00D09C]/30 transition-all group disabled:opacity-60 disabled:cursor-not-allowed"
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:1288:                    <div className="size-10 rounded-lg bg-[#00D09C]/10 flex items-center justify-center shrink-0 group-hover:bg-[#00D09C]/20 transition-colors">
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:1290:                        <Loader2 className="size-5 text-[#00D09C] animate-spin" />
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:1292:                        <Download className="size-5 text-[#00D09C]" />
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:1305:                    className="flex items-center gap-3 p-4 rounded-xl border border-border bg-card hover:bg-[#e6faf4] hover:border-[#00D09C]/30 transition-all group disabled:opacity-60 disabled:cursor-not-allowed"
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:1324:                    className="flex items-center gap-3 p-4 rounded-xl border border-border bg-card hover:bg-[#e6faf4] hover:border-[#00D09C]/30 transition-all group disabled:opacity-60 disabled:cursor-not-allowed"
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:1348:                  <Lock className="size-5 text-[#00D09C]" />
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:1360:                      <KeyRound className="size-4 text-muted-foreground group-hover:text-[#00D09C] transition-colors" />
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:1396:                    <MonitorSmartphone className="size-5 text-[#00D09C]" />
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:1445:                          ? "border-[#00D09C]/20 bg-[#e6faf4]/30"
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:1453:                          ? "bg-[#00D09C]/10"
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:1461:                          <Smartphone className={cn("size-5", session.isCurrent ? "text-[#00D09C]" : "text-[#5367ff]")} />
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:1463:                          <Tablet className={cn("size-5", session.isCurrent ? "text-[#00D09C]" : "text-[#f59e0b]")} />
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:1465:                          <Monitor className={cn("size-5", session.isCurrent ? "text-[#00D09C]" : "text-muted-foreground")} />
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:1474:                            <Badge className="bg-[#00D09C]/10 text-[#00D09C] hover:bg-[#00D09C]/20 border-0 text-[10px] px-1.5 py-0 font-semibold">
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:1531:                    <HelpCircle className="size-5 text-[#00D09C]" />
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:1550:                      <HelpCircle className="size-4 text-muted-foreground group-hover:text-[#00D09C] transition-colors" />
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:1567:                      <MessageSquare className="size-4 text-muted-foreground group-hover:text-[#00D09C] transition-colors" />
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:1672:              <User className="size-5 text-[#00D09C]" /> Edit Profile
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:1681:                className="border-border focus:border-[#00D09C] focus:ring-[#00D09C]/20"
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:1690:                className="border-border focus:border-[#00D09C] focus:ring-[#00D09C]/20"
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:1702:              className="bg-[#00D09C] hover:bg-[#00b888] text-white border-0"
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:1716:              <KeyRound className="size-5 text-[#00D09C]" /> Change Password
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:1727:                  className="border-border focus:border-[#00D09C] focus:ring-[#00D09C]/20 pr-10"
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:1745:                  className="border-border focus:border-[#00D09C] focus:ring-[#00D09C]/20 pr-10"
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:1762:                className="border-border focus:border-[#00D09C] focus:ring-[#00D09C]/20"
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:1774:              className="bg-[#00D09C] hover:bg-[#00b888] text-white border-0"
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:1788:              <Plus className="size-5 text-[#00D09C]" /> Add Money
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:1798:                className="border-border focus:border-[#00D09C] focus:ring-[#00D09C]/20 text-lg font-mono"
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:1807:                  className="px-3 py-1.5 rounded-lg text-xs font-bold bg-muted text-muted-foreground hover:bg-[#e6faf4] hover:text-[#00D09C] transition-colors"
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:1822:              className="bg-[#00D09C] hover:bg-[#00b888] text-white border-0"
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:1953:            <div className="rounded-xl border border-[#00D09C]/15 bg-[#00D09C]/5 p-4 space-y-2">
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:1954:              <p className="text-xs font-bold uppercase tracking-wider text-[#00D09C]">This will reset:</p>
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:1963:                    <RotateCcw className="size-3 text-[#00D09C]" />
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:2008:              <div className="size-8 rounded-lg bg-[#00D09C]/10 flex items-center justify-center">
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:2009:                <FileText className="size-4 text-[#00D09C]" />
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:2035:                  <div className="size-4 rounded-full bg-[#00D09C]/10 flex items-center justify-center shrink-0">
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:2036:                    <svg className="size-2.5 text-[#00D09C]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+/home/z/my-project/src/components/nexttrade/pages/profile-page.tsx:2071:              className="gap-2 bg-[#00D09C] hover:bg-[#00b88a] text-white font-semibold rounded-lg min-w-[140px]"
+/home/z/my-project/src/components/nexttrade/pages/help-support-page.tsx:69:    question: 'How do I create a Pepertect account?',
+/home/z/my-project/src/components/nexttrade/pages/help-support-page.tsx:70:    answer: 'You can create a Pepertect account in two ways: using your email and password, or by signing in with your Google account. Simply click the "Sign Up" button on the login page, fill in your details, and you\'ll receive ₹1,00,000 virtual balance to start paper trading immediately. No KYC or bank account needed since this is a simulation platform.',
+/home/z/my-project/src/components/nexttrade/pages/help-support-page.tsx:87:    question: 'Is my data safe on Pepertect?',
+/home/z/my-project/src/components/nexttrade/pages/help-support-page.tsx:94:    answer: 'Paper trading (also called virtual trading) allows you to practice trading with virtual money instead of real capital. Pepertect gives you ₹1,00,000 virtual balance to trade stocks, futures, and options in real market conditions. You can buy, sell, and track positions just like real trading, but without any financial risk. It\'s the perfect way to learn and test strategies.',
+/home/z/my-project/src/components/nexttrade/pages/help-support-page.tsx:99:    question: 'How do I place a trade on Pepertect?',
+/home/z/my-project/src/components/nexttrade/pages/help-support-page.tsx:105:    question: 'What brokerage does Pepertect charge?',
+/home/z/my-project/src/components/nexttrade/pages/help-support-page.tsx:106:    answer: 'Pepertect charges realistic brokerage to simulate real trading conditions: Equity Intraday: 0.05% on both buy & sell sides, Equity Delivery: 0.1% on both sides, Futures: 0.02% on both sides, Options: ₹20 per lot on sell side. Minimum brokerage is ₹5 per order and maximum is ₹200 per order. These rates are similar to what real discount brokers charge.',
+/home/z/my-project/src/components/nexttrade/pages/help-support-page.tsx:111:    question: 'Can I trade Futures and Options on Pepertect?',
+/home/z/my-project/src/components/nexttrade/pages/help-support-page.tsx:112:    answer: 'Yes! Pepertect supports all three segments: Equity (Cash), Futures, and Options. You can trade NIFTY, BANKNIFTY, and FINNIFTY index futures and options with real lot sizes and strike intervals. Stock F&O is also available for major stocks. Select the segment when placing your order from the Trading page or use the dedicated Option Chain and Futures pages.',
+/home/z/my-project/src/components/nexttrade/pages/help-support-page.tsx:130:    answer: 'No, the virtual balance on Pepertect is for paper trading only and cannot be withdrawn or converted to real money. It\'s purely a simulation to help you practice trading strategies and learn about the Indian stock market without any financial risk. When you reset your balance, it simply returns to the default ₹1,00,000.',
+/home/z/my-project/src/components/nexttrade/pages/help-support-page.tsx:339:                ? "border-[#00D09C] bg-[#00D09C]/5"
+/home/z/my-project/src/components/nexttrade/pages/help-support-page.tsx:340:                : "border-border bg-card hover:border-[#00D09C]/30 hover:bg-[#00D09C]/5"
+/home/z/my-project/src/components/nexttrade/pages/help-support-page.tsx:345:              activeTab === 'contact' ? "bg-[#00D09C]" : "bg-[#00D09C]/10"
+/home/z/my-project/src/components/nexttrade/pages/help-support-page.tsx:347:              <MessageSquare className={cn("size-5", activeTab === 'contact' ? "text-white" : "text-[#00D09C]")} />
+/home/z/my-project/src/components/nexttrade/pages/help-support-page.tsx:350:              <p className={cn("text-xs font-semibold", activeTab === 'contact' ? "text-[#00D09C]" : "text-foreground")}>Contact</p>
+/home/z/my-project/src/components/nexttrade/pages/help-support-page.tsx:455:                        faq.category === 'trading' ? "bg-[#00D09C]/10 text-[#00D09C]" :
+/home/z/my-project/src/components/nexttrade/pages/help-support-page.tsx:494:                <MessageSquare className="size-5 text-[#00D09C]" />
+/home/z/my-project/src/components/nexttrade/pages/help-support-page.tsx:509:                    <p className="text-xs text-muted-foreground mt-0.5">support@pepertect.in</p>
+/home/z/my-project/src/components/nexttrade/pages/help-support-page.tsx:513:                    href="mailto:support@pepertect.in"
+/home/z/my-project/src/components/nexttrade/pages/help-support-page.tsx:522:                  <div className="size-11 rounded-xl bg-[#00D09C]/10 flex items-center justify-center shrink-0">
+/home/z/my-project/src/components/nexttrade/pages/help-support-page.tsx:523:                    <Phone className="size-5 text-[#00D09C]" />
+/home/z/my-project/src/components/nexttrade/pages/help-support-page.tsx:532:                    className="px-3 py-1.5 rounded-lg bg-[#00D09C] text-white text-xs font-semibold hover:bg-[#00b88a] transition-colors"
+/home/z/my-project/src/components/nexttrade/pages/help-support-page.tsx:580:              <div className="mt-3 p-3 rounded-xl bg-[#e6faf4] border border-[#00D09C]/10 flex items-start gap-2">
+/home/z/my-project/src/components/nexttrade/pages/help-support-page.tsx:581:                <CheckCircle2 className="size-4 text-[#00D09C] shrink-0 mt-0.5" />
+/home/z/my-project/src/components/nexttrade/pages/help-support-page.tsx:788:                        ticket.status === 'RESOLVED' ? "bg-[#00D09C]/10" :
+/home/z/my-project/src/components/nexttrade/pages/help-support-page.tsx:796:                          <CheckCircle2 className="size-5 text-[#00D09C]" />
+/home/z/my-project/src/components/nexttrade/pages/help-support-page.tsx:808:                            ticket.status === 'RESOLVED' ? "bg-[#00D09C]/10 text-[#00D09C]" :
+/home/z/my-project/src/components/nexttrade/pages/help-support-page.tsx:846:                          <div className="p-3 rounded-xl bg-[#e6faf4] border border-[#00D09C]/10">
+/home/z/my-project/src/components/nexttrade/pages/help-support-page.tsx:848:                              <CheckCircle2 className="size-3 text-[#00D09C]" />
+/home/z/my-project/src/components/nexttrade/pages/help-support-page.tsx:849:                              <p className="text-xs font-semibold text-[#00D09C] uppercase tracking-wider">Support Reply</p>
+/home/z/my-project/src/components/nexttrade/pages/settings-page.tsx:149:              defaultValue="alex.thompson@pepertect.com"
+/home/z/my-project/src/components/nexttrade/pages/option-chain-page.tsx:7:import { useTradeSuccess } from '@/components/pepertect/trade-success-popup'
+/home/z/my-project/src/components/nexttrade/pages/option-chain-page.tsx:8:import { TradeConfirmModal, TradeConfirmData } from '@/components/pepertect/ui/trade-confirm-modal'
+/home/z/my-project/src/components/nexttrade/pages/option-chain-page.tsx:9:import { StrikeOverviewDrawer } from '@/components/pepertect/ui/strike-overview-drawer'
+/home/z/my-project/src/components/nexttrade/pages/option-chain-page.tsx:135:  primary: '#00D09C',
+/home/z/my-project/src/components/nexttrade/pages/futures-page.tsx:37:import { useTradeSuccess } from '@/components/pepertect/trade-success-popup'
+/home/z/my-project/src/components/nexttrade/pages/futures-page.tsx:320:        <div className="flex size-10 items-center justify-center rounded-xl bg-[#00D09C]/10">
+/home/z/my-project/src/components/nexttrade/pages/futures-page.tsx:321:          <CandlestickChart className="size-5 text-[#00D09C]" />
+/home/z/my-project/src/components/nexttrade/pages/futures-page.tsx:339:                  ? 'bg-[#00D09C] text-white shadow-md'
+/home/z/my-project/src/components/nexttrade/pages/futures-page.tsx:340:                  : 'bg-background text-muted-foreground hover:bg-[#00D09C]/10 hover:text-[#00D09C]'
+/home/z/my-project/src/components/nexttrade/pages/futures-page.tsx:353:            <Loader2 className="size-6 animate-spin text-[#00D09C]" />
+/home/z/my-project/src/components/nexttrade/pages/futures-page.tsx:413:                <BarChart3 className="size-4 text-[#00D09C]" />
+/home/z/my-project/src/components/nexttrade/pages/futures-page.tsx:426:                        <stop offset="5%" stopColor="#00D09C" stopOpacity={0.2} />
+/home/z/my-project/src/components/nexttrade/pages/futures-page.tsx:427:                        <stop offset="95%" stopColor="#00D09C" stopOpacity={0} />
+/home/z/my-project/src/components/nexttrade/pages/futures-page.tsx:459:                      stroke="#00D09C"
+/home/z/my-project/src/components/nexttrade/pages/futures-page.tsx:513:              <Wallet className="size-4 text-[#00D09C]" />
+/home/z/my-project/src/components/nexttrade/pages/futures-page.tsx:564:                            ? 'bg-[#00D09C]/10 text-[#00D09C] border border-[#00D09C]/30'
+/home/z/my-project/src/components/nexttrade/pages/futures-page.tsx:565:                            : 'bg-background text-muted-foreground hover:bg-[#00D09C]/5'
+/home/z/my-project/src/components/nexttrade/pages/futures-page.tsx:633:                    <span className="font-mono font-tabular font-bold text-[#00D09C] text-base">{formatINR(Number(marginRequired))}</span>
+/home/z/my-project/src/components/nexttrade/pages/futures-page.tsx:640:                    <Wallet className="size-4 text-[#00D09C]" />
+/home/z/my-project/src/components/nexttrade/pages/futures-page.tsx:685:            <CandlestickChart className="size-4 text-[#00D09C]" />
+/home/z/my-project/src/components/nexttrade/pages/futures-page.tsx:703:            <Loader2 className="size-6 animate-spin text-[#00D09C]" />
+/home/z/my-project/src/components/nexttrade/pages/futures-page.tsx:736:                      <tr key={pos.id} className="border-b border-border hover:bg-[#00D09C]/5 transition-colors">
+/home/z/my-project/src/components/nexttrade/pages/watchlist-page.tsx:25:import { StockLogo } from '@/components/pepertect/ui/stock-logo'
+/home/z/my-project/src/components/nexttrade/pages/watchlist-page.tsx:201:              <div className="flex size-10 items-center justify-center rounded-xl" style={{ background: 'linear-gradient(135deg, #00D09C 0%, #00A67E 100%)' }}>
+/home/z/my-project/src/components/nexttrade/pages/watchlist-page.tsx:221:                  className="pl-9 h-10 w-full sm:w-72 bg-background border border-border rounded-xl text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-[#00D09C]/20 focus:border-[#00D09C] px-4"
+/home/z/my-project/src/components/nexttrade/pages/watchlist-page.tsx:228:                className="h-10 w-10 p-0 rounded-xl border-border text-muted-foreground hover:text-[#00D09C] hover:border-[#00D09C]/30"
+/home/z/my-project/src/components/nexttrade/pages/watchlist-page.tsx:253:                <Star className="size-3 text-[#00D09C]" />
+/home/z/my-project/src/components/nexttrade/pages/watchlist-page.tsx:315:                      className="mt-5 gap-2 bg-[#00D09C] hover:bg-[#00b88a] text-white font-semibold rounded-xl"
+/home/z/my-project/src/components/nexttrade/pages/admin-page.tsx:73:import { GoogleOAuthSetup } from '@/components/pepertect/google-oauth-setup'
+/home/z/my-project/src/components/nexttrade/pages/admin-page.tsx:927:    const token = typeof window !== 'undefined' ? localStorage.getItem('pepertect_token') : null
+/home/z/my-project/src/components/nexttrade/pages/admin-page.tsx:936:      const authToken = localStorage.getItem('pepertect_token') || localStorage.getItem('admin_token')
+/home/z/my-project/src/components/nexttrade/pages/portfolio-page.tsx:41:import { DateFilter, DateFilterPreset, DateRange, getDateRange, isDateInRange } from '@/components/pepertect/date-filter'
+/home/z/my-project/src/components/nexttrade/pages/portfolio-page.tsx:291:      { name: 'Positions', value: filteredCurrentValue, color: '#00D09C' },
+/home/z/my-project/src/components/nexttrade/pages/portfolio-page.tsx:315:        color: '#00D09C',
+/home/z/my-project/src/components/nexttrade/pages/portfolio-page.tsx:365:            className="gap-1.5 rounded-lg bg-[#00D09C] text-white font-semibold shadow-md hover:bg-[#00b88a] active:scale-[0.98]"
+/home/z/my-project/src/components/nexttrade/pages/portfolio-page.tsx:377:          <CalendarIcon className="size-3.5 text-[#00D09C]" />
+/home/z/my-project/src/components/nexttrade/pages/portfolio-page.tsx:449:                      <div className="size-7 rounded-lg bg-[#00D09C]/10 flex items-center justify-center">
+/home/z/my-project/src/components/nexttrade/pages/portfolio-page.tsx:450:                        <Wallet className="size-3.5 text-[#00D09C]" />
+/home/z/my-project/src/components/nexttrade/pages/portfolio-page.tsx:547:              <Card className="bg-card border border-border rounded-xl shadow-sm border-l-4 border-l-[#00D09C]">
+/home/z/my-project/src/components/nexttrade/pages/portfolio-page.tsx:551:                    <div className="size-7 rounded-lg bg-[#00D09C]/10 flex items-center justify-center">
+/home/z/my-project/src/components/nexttrade/pages/portfolio-page.tsx:552:                      <Briefcase className="size-3.5 text-[#00D09C]" />
+/home/z/my-project/src/components/nexttrade/pages/portfolio-page.tsx:558:                  <div className="mt-2 flex items-center gap-1 text-xs font-semibold text-[#00D09C]">
+/home/z/my-project/src/components/nexttrade/pages/portfolio-page.tsx:575:                <Badge variant="secondary" className="bg-[#00D09C]/10 text-[#00D09C] border-0 text-xs font-semibold">
+/home/z/my-project/src/components/nexttrade/pages/portfolio-page.tsx:589:                    className="mt-4 gap-1.5 bg-[#00D09C] hover:bg-[#00b88a] text-white font-semibold rounded-lg"
+/home/z/my-project/src/components/nexttrade/pages/portfolio-page.tsx:623:                                <span className="text-sm font-bold text-[#00D09C]">{pos.symbol}</span>
+/home/z/my-project/src/components/nexttrade/pages/portfolio-page.tsx:699:                    <Card key={segment.name} className="bg-card border border-border rounded-xl shadow-sm hover:shadow-md hover:border-[#00D09C]/20 transition-all duration-300">
+/home/z/my-project/src/components/nexttrade/pages/portfolio-page.tsx:755:                    <PieChartIcon className="size-5 text-[#00D09C]" />
+/home/z/my-project/src/components/nexttrade/pages/portfolio-page.tsx:827:              <Card className="bg-card border border-border rounded-xl shadow-sm h-full border-l-4 border-l-[#00D09C]">
+/home/z/my-project/src/components/nexttrade/pages/orders-page.tsx:40:import { DateFilter, DateFilterPreset, DateRange, getDateRange, isDateInRange } from '@/components/pepertect/date-filter'
+/home/z/my-project/src/components/nexttrade/pages/orders-page.tsx:97:    PARTIALLY_FILLED: 'bg-[#00D09C]/10 text-[#00D09C] border-[#00D09C]/20',
+/home/z/my-project/src/components/nexttrade/pages/orders-page.tsx:202:            className="mt-5 gap-1.5 bg-[#00D09C] hover:bg-[#00b88a] text-white font-semibold rounded-lg"
+/home/z/my-project/src/components/nexttrade/pages/orders-page.tsx:396:          <Clock className="size-3.5 text-[#00D09C]" />
+/home/z/my-project/src/components/nexttrade/pages/orders-page.tsx:414:          { label: 'Total Orders', value: String(filteredOrders.length), icon: ClipboardList, borderColor: 'border-l-[#00D09C]', iconBg: 'bg-[#00D09C]/10', iconColor: 'text-[#00D09C]' },
+/home/z/my-project/src/components/nexttrade/pages/orders-page.tsx:417:          { label: 'Total Volume', value: formatLargeNumber(totalVolume), icon: IndianRupee, borderColor: 'border-l-[#00D09C]', iconBg: 'bg-[#00D09C]/10', iconColor: 'text-[#00D09C]' },
+/home/z/my-project/src/components/nexttrade/pages/orders-page.tsx:453:                    className="text-xs font-semibold px-4 py-1.5 rounded-md data-[state=active]:bg-[#00D09C] data-[state=active]:text-white data-[state=active]:shadow-sm text-muted-foreground transition-all"
+/home/z/my-project/src/components/nexttrade/pages/orders-page.tsx:460:                    className="text-xs font-semibold px-4 py-1.5 rounded-md data-[state=active]:bg-[#00D09C] data-[state=active]:text-white data-[state=active]:shadow-sm text-muted-foreground transition-all"
+/home/z/my-project/src/components/nexttrade/pages/learning-page.tsx:51:      return 'bg-[#00D09C]/10 text-[#00D09C]'
+/home/z/my-project/src/components/nexttrade/pages/learning-page.tsx:64:      return 'border-l-[#00D09C]'
+/home/z/my-project/src/components/nexttrade/pages/learning-page.tsx:130:          <div className="flex size-10 items-center justify-center rounded-xl bg-[#00D09C]/10">
+/home/z/my-project/src/components/nexttrade/pages/learning-page.tsx:131:            <GraduationCap className="size-5 text-[#00D09C]" />
+/home/z/my-project/src/components/nexttrade/pages/learning-page.tsx:157:          <div className="flex size-10 items-center justify-center rounded-xl bg-[#00D09C]/10">
+/home/z/my-project/src/components/nexttrade/pages/learning-page.tsx:158:            <GraduationCap className="size-5 text-[#00D09C]" />
+/home/z/my-project/src/components/nexttrade/pages/learning-page.tsx:187:          <div className="flex size-10 items-center justify-center rounded-xl bg-[#00D09C]/10">
+/home/z/my-project/src/components/nexttrade/pages/learning-page.tsx:188:            <GraduationCap className="size-5 text-[#00D09C]" />
+/home/z/my-project/src/components/nexttrade/pages/learning-page.tsx:197:          className="bg-[#00D09C]/10 text-[#00D09C] border-0 text-sm font-semibold px-4 py-2 self-start sm:self-auto gap-1.5"
+/home/z/my-project/src/components/nexttrade/pages/learning-page.tsx:209:            <span className="font-mono text-sm font-bold text-[#00D09C]">
+/home/z/my-project/src/components/nexttrade/pages/learning-page.tsx:226:          <Lightbulb className="size-5 text-[#00D09C]" />
+/home/z/my-project/src/components/nexttrade/pages/learning-page.tsx:280:                    className="w-full gap-1.5 bg-[#00D09C] hover:bg-[#00b88a] text-white"
+/home/z/my-project/src/components/nexttrade/pages/index-detail-page.tsx:241:            className="mt-4 text-[#00D09C] border-[#00D09C]/30 hover:bg-[#00D09C]/10"
+/home/z/my-project/src/components/nexttrade/pages/index-detail-page.tsx:327:                      ? 'bg-[#00D09C] text-white shadow-sm'
+/home/z/my-project/src/components/nexttrade/pages/index-detail-page.tsx:340:                  chartType === 'area' ? 'bg-muted text-[#00D09C]' : 'text-muted-foreground hover:text-foreground'
+/home/z/my-project/src/components/nexttrade/pages/index-detail-page.tsx:350:                  chartType === 'candle' ? 'bg-muted text-[#00D09C]' : 'text-muted-foreground hover:text-foreground'
+/home/z/my-project/src/components/nexttrade/pages/index-detail-page.tsx:365:                    <div className="size-2 rounded-full bg-[#00D09C] animate-bounce" style={{ animationDelay: '0ms' }} />
+/home/z/my-project/src/components/nexttrade/pages/index-detail-page.tsx:366:                    <div className="size-2 rounded-full bg-[#00D09C] animate-bounce" style={{ animationDelay: '150ms' }} />
+/home/z/my-project/src/components/nexttrade/pages/index-detail-page.tsx:367:                    <div className="size-2 rounded-full bg-[#00D09C] animate-bounce" style={{ animationDelay: '300ms' }} />
+/home/z/my-project/src/components/nexttrade/pages/reports-page.tsx:52:import { DateFilter, DateFilterPreset, DateRange, getDateRange, isDateInRange } from '@/components/pepertect/date-filter'
+/home/z/my-project/src/components/nexttrade/pages/reports-page.tsx:146:        last: `pepertect-last-trade-${new Date().toISOString().split('T')[0]}.pdf`,
+/home/z/my-project/src/components/nexttrade/pages/reports-page.tsx:147:        monthly: `pepertect-monthly-report-${new Date().toISOString().split('T')[0]}.pdf`,
+/home/z/my-project/src/components/nexttrade/pages/reports-page.tsx:148:        full: `pepertect-full-report-${new Date().toISOString().split('T')[0]}.pdf`,
+/home/z/my-project/src/components/nexttrade/pages/reports-page.tsx:249:      borderColor: 'border-l-[#00D09C]',
+/home/z/my-project/src/components/nexttrade/pages/reports-page.tsx:250:      textColor: 'text-[#00D09C]',
+/home/z/my-project/src/components/nexttrade/pages/reports-page.tsx:251:      bgColor: 'bg-[#00D09C]/10',
+/home/z/my-project/src/components/nexttrade/pages/reports-page.tsx:371:                className="mt-4 gap-1.5 bg-[#00D09C] hover:bg-[#00b88a] text-white font-semibold rounded-lg"
+/home/z/my-project/src/components/nexttrade/pages/reports-page.tsx:385:              <Calendar className="size-3.5 text-[#00D09C]" />
+/home/z/my-project/src/components/nexttrade/pages/reports-page.tsx:405:                    <LineChart className="size-5 text-[#00D09C]" />
+/home/z/my-project/src/components/nexttrade/pages/reports-page.tsx:430:                  <div className="size-16 rounded-full bg-[#00D09C]/8 flex items-center justify-center mb-4">
+/home/z/my-project/src/components/nexttrade/pages/reports-page.tsx:431:                    <Activity className="size-8 text-[#00D09C]/40" />
+/home/z/my-project/src/components/nexttrade/pages/reports-page.tsx:453:                    <Target className="size-5 text-[#00D09C]" />
+/home/z/my-project/src/components/nexttrade/pages/reports-page.tsx:595:                    <BarChart3 className="size-5 text-[#00D09C]" />
+/home/z/my-project/src/components/nexttrade/pages/reports-page.tsx:609:                      { name: 'Equity', icon: Briefcase, color: '#00D09C', trades: filteredTrades.filter(t => t.segment === 'EQUITY' || t.segment === 'CASH') },
+/home/z/my-project/src/components/nexttrade/pages/reports-page.tsx:709:                    <Crosshair className="size-5 text-[#00D09C]" />
+/home/z/my-project/src/components/nexttrade/pages/reports-page.tsx:719:                  <Badge variant="secondary" className="bg-[#00D09C]/10 text-[#00D09C] border-0 text-xs font-semibold">
+/home/z/my-project/src/components/nexttrade/pages/reports-page.tsx:751:                                <span className="font-bold text-sm text-[#00D09C]">{trade.symbol}</span>
+/home/z/my-project/src/components/nexttrade/pages/reports-page.tsx:806:              <Card className="bg-card border border-border rounded-xl shadow-sm border-l-4 border-l-[#00D09C]">
+/home/z/my-project/src/components/nexttrade/pages/reports-page.tsx:859:                  <Download className="size-5 text-[#00D09C]" />
+/home/z/my-project/src/components/nexttrade/pages/reports-page.tsx:873:                  <div className="rounded-xl border border-border bg-card p-5 hover:border-[#00D09C]/30 hover:bg-[#e6faf4]/30 transition-all group">
+/home/z/my-project/src/components/nexttrade/pages/reports-page.tsx:875:                      <div className="size-10 rounded-lg bg-[#00D09C]/10 flex items-center justify-center shrink-0 group-hover:bg-[#00D09C]/20 transition-colors">
+/home/z/my-project/src/components/nexttrade/pages/reports-page.tsx:876:                        <FileText className="size-5 text-[#00D09C]" />
+/home/z/my-project/src/components/nexttrade/pages/reports-page.tsx:885:                      className="w-full gap-2 bg-[#00D09C] hover:bg-[#00b88a] text-white font-semibold rounded-lg"
+/home/z/my-project/src/components/nexttrade/pages/reports-page.tsx:899:                  <div className="rounded-xl border border-border bg-card p-5 hover:border-[#00D09C]/30 hover:bg-[#e6faf4]/30 transition-all group">
+/home/z/my-project/src/components/nexttrade/pages/reports-page.tsx:901:                      <div className="size-10 rounded-lg bg-[#00D09C]/10 flex items-center justify-center shrink-0 group-hover:bg-[#00D09C]/20 transition-colors">
+/home/z/my-project/src/components/nexttrade/pages/reports-page.tsx:902:                        <Calendar className="size-5 text-[#00D09C]" />
+/home/z/my-project/src/components/nexttrade/pages/reports-page.tsx:911:                      className="w-full gap-2 bg-[#00D09C] hover:bg-[#00b88a] text-white font-semibold rounded-lg"
+/home/z/my-project/src/components/nexttrade/pages/reports-page.tsx:925:                  <div className="rounded-xl border border-border bg-card p-5 hover:border-[#00D09C]/30 hover:bg-[#e6faf4]/30 transition-all group">
+/home/z/my-project/src/components/nexttrade/pages/reports-page.tsx:927:                      <div className="size-10 rounded-lg bg-[#00D09C]/10 flex items-center justify-center shrink-0 group-hover:bg-[#00D09C]/20 transition-colors">
+/home/z/my-project/src/components/nexttrade/pages/reports-page.tsx:928:                        <BarChart3 className="size-5 text-[#00D09C]" />
+/home/z/my-project/src/components/nexttrade/pages/reports-page.tsx:937:                      className="w-full gap-2 bg-[#00D09C] hover:bg-[#00b88a] text-white font-semibold rounded-lg"
+/home/z/my-project/src/components/nexttrade/pages/reports-page.tsx:964:              <div className="size-8 rounded-lg bg-[#00D09C]/10 flex items-center justify-center">
+/home/z/my-project/src/components/nexttrade/pages/reports-page.tsx:965:                <FileText className="size-4 text-[#00D09C]" />
+/home/z/my-project/src/components/nexttrade/pages/reports-page.tsx:992:                  <div className="size-4 rounded-full bg-[#00D09C]/10 flex items-center justify-center shrink-0">
+/home/z/my-project/src/components/nexttrade/pages/reports-page.tsx:993:                    <svg className="size-2.5 text-[#00D09C]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+/home/z/my-project/src/components/nexttrade/pages/reports-page.tsx:1028:              className="gap-2 bg-[#00D09C] hover:bg-[#00b88a] text-white font-semibold rounded-lg min-w-[140px]"
+/home/z/my-project/src/components/nexttrade/global-sl-monitor.tsx:7:import { useTradeSuccess } from '@/components/pepertect/trade-success-popup'
+/home/z/my-project/src/components/nexttrade/pages/trading-page.tsx:32:import { useTradeSuccess } from '@/components/pepertect/trade-success-popup'
+/home/z/my-project/src/components/nexttrade/pages/trading-page.tsx:33:import { TradeConfirmModal, TradeConfirmData } from '@/components/pepertect/ui/trade-confirm-modal'
+/home/z/my-project/src/components/nexttrade/pages/trading-page.tsx:36:import { StockLogo } from '@/components/pepertect/ui/stock-logo'
+/home/z/my-project/src/components/nexttrade/pages/trading-page.tsx:166:    'Banking': 'bg-[#00D09C]/8 text-[#00D09C]',
+/home/z/my-project/src/components/nexttrade/pages/trading-page.tsx:175:    'Finance': 'bg-[#00D09C]/8 text-[#00D09C]',
+/home/z/my-project/src/components/nexttrade/pages/trading-page.tsx:176:    'Financial Services': 'bg-[#00D09C]/8 text-[#00D09C]',
+
+[Showing results with pagination = limit: 250]

@@ -1,0 +1,882 @@
+     1→'use client'
+     2→
+     3→import { useState, useEffect, useCallback } from 'react'
+     4→import { Button } from '@/components/ui/button'
+     5→import { Badge } from '@/components/ui/badge'
+     6→import { Skeleton } from '@/components/ui/skeleton'
+     7→import {
+     8→  Dialog,
+     9→  DialogContent,
+    10→  DialogDescription,
+    11→  DialogFooter,
+    12→  DialogHeader,
+    13→  DialogTitle,
+    14→} from '@/components/ui/dialog'
+    15→import { useAuthStore } from '@/lib/auth-store'
+    16→import { useAppStore } from '@/lib/store'
+    17→import { motion } from 'framer-motion'
+    18→import { toast } from 'sonner'
+    19→import { cn } from '@/lib/utils'
+    20→import {
+    21→  ArrowLeft,
+    22→  HelpCircle,
+    23→  MessageSquare,
+    24→  Ticket,
+    25→  ChevronDown,
+    26→  ChevronRight,
+    27→  ChevronUp,
+    28→  Mail,
+    29→  Phone,
+    30→  Clock,
+    31→  Send,
+    32→  Loader2,
+    33→  CheckCircle2,
+    34→  AlertCircle,
+    35→  Search,
+    36→  BookOpen,
+    37→  Shield,
+    38→  TrendingUp,
+    39→  Wallet,
+    40→  FileText,
+    41→  X,
+    42→} from 'lucide-react'
+    43→
+    44→// ─── Animation ───────────────────────────────────────────────────
+    45→
+    46→const fadeInUp = {
+    47→  hidden: { opacity: 0, y: 16 },
+    48→  visible: (i: number) => ({
+    49→    opacity: 1,
+    50→    y: 0,
+    51→    transition: { delay: i * 0.05, duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] },
+    52→  }),
+    53→}
+    54→
+    55→// ─── FAQ Data ────────────────────────────────────────────────────
+    56→
+    57→const FAQ_CATEGORIES = [
+    58→  { id: 'all', label: 'All', icon: HelpCircle },
+    59→  { id: 'account', label: 'Account', icon: Shield },
+    60→  { id: 'trading', label: 'Trading', icon: TrendingUp },
+    61→  { id: 'funds', label: 'Funds', icon: Wallet },
+    62→  { id: 'reports', label: 'Reports', icon: FileText },
+    63→]
+    64→
+    65→const FAQ_DATA = [
+    66→  {
+    67→    id: 1,
+    68→    category: 'account',
+    69→    question: 'How do I create a Pepertect account?',
+    70→    answer: 'You can create a Pepertect account in two ways: using your email and password, or by signing in with your Google account. Simply click the "Sign Up" button on the login page, fill in your details, and you\'ll receive ₹1,00,000 virtual balance to start paper trading immediately. No KYC or bank account needed since this is a simulation platform.',
+    71→  },
+    72→  {
+    73→    id: 2,
+    74→    category: 'account',
+    75→    question: 'I forgot my password. How do I reset it?',
+    76→    answer: 'Currently, you can reset your password from the Profile page. Go to Profile > Security > Change Password. Enter your current password and set a new one. If you\'ve forgotten your current password, you can sign in using Google OAuth instead. We\'re working on adding a "Forgot Password" email reset feature in a future update.',
+    77→  },
+    78→  {
+    79→    id: 3,
+    80→    category: 'account',
+    81→    question: 'How do I check which devices are logged into my account?',
+    82→    answer: 'Go to Profile > Active Devices section. You\'ll see all devices currently logged into your account with details like browser, OS, IP address, and location. You can logout from any individual device or use "Logout All" to sign out from all devices except the current one. This helps keep your account secure.',
+    83→  },
+    84→  {
+    85→    id: 4,
+    86→    category: 'account',
+    87→    question: 'Is my data safe on Pepertect?',
+    88→    answer: 'Yes! We take security seriously. Your password is encrypted using bcrypt hashing. All sessions are tracked with device and location information. You can monitor and logout from any unauthorized devices. Our platform runs on secure infrastructure with SSL encryption for all data transfers.',
+    89→  },
+    90→  {
+    91→    id: 5,
+    92→    category: 'trading',
+    93→    question: 'What is paper trading / virtual trading?',
+    94→    answer: 'Paper trading (also called virtual trading) allows you to practice trading with virtual money instead of real capital. Pepertect gives you ₹1,00,000 virtual balance to trade stocks, futures, and options in real market conditions. You can buy, sell, and track positions just like real trading, but without any financial risk. It\'s the perfect way to learn and test strategies.',
+    95→  },
+    96→  {
+    97→    id: 6,
+    98→    category: 'trading',
+    99→    question: 'How do I place a trade on Pepertect?',
+   100→    answer: 'To place a trade: 1) Navigate to the Trading page from the sidebar, 2) Search for a stock or select an index, 3) Choose your segment (Equity, Futures, or Options), 4) Select order type (Market, Limit, SL, SL-M), 5) Enter quantity/lots and price, 6) Review the order summary with brokerage calculation, 7) Click "Place Order". For options, you can also use the Option Chain page for a visual strike price selection.',
+   101→  },
+   102→  {
+   103→    id: 7,
+   104→    category: 'trading',
+   105→    question: 'What brokerage does Pepertect charge?',
+   106→    answer: 'Pepertect charges realistic brokerage to simulate real trading conditions: Equity Intraday: 0.05% on both buy & sell sides, Equity Delivery: 0.1% on both sides, Futures: 0.02% on both sides, Options: ₹20 per lot on sell side. Minimum brokerage is ₹5 per order and maximum is ₹200 per order. These rates are similar to what real discount brokers charge.',
+   107→  },
+   108→  {
+   109→    id: 8,
+   110→    category: 'trading',
+   111→    question: 'Can I trade Futures and Options on Pepertect?',
+   112→    answer: 'Yes! Pepertect supports all three segments: Equity (Cash), Futures, and Options. You can trade NIFTY, BANKNIFTY, and FINNIFTY index futures and options with real lot sizes and strike intervals. Stock F&O is also available for major stocks. Select the segment when placing your order from the Trading page or use the dedicated Option Chain and Futures pages.',
+   113→  },
+   114→  {
+   115→    id: 9,
+   116→    category: 'funds',
+   117→    question: 'How do I add more virtual funds to my account?',
+   118→    answer: 'Go to Profile > Virtual Balance section and click "Add Money". You can add virtual funds in preset amounts (₹10,000, ₹25,000, ₹50,000, ₹1,00,000) or enter a custom amount. Since this is paper trading, the virtual money has no real value — it\'s purely for practice. You can also reset your balance to ₹1,00,000 from the same section.',
+   119→  },
+   120→  {
+   121→    id: 10,
+   122→    category: 'funds',
+   123→    question: 'What is margin and how is it calculated?',
+   124→    answer: 'Margin is the amount blocked from your balance when you open a position. For Equity Intraday, margin is typically 20% of trade value. For Futures, it\'s around 10% (SPAN + Exposure). For Options buying, you pay the full premium. For Options selling, margin is similar to futures. The exact margin required is shown before you place each order.',
+   125→  },
+   126→  {
+   127→    id: 11,
+   128→    category: 'funds',
+   129→    question: 'Can I withdraw my virtual balance?',
+   130→    answer: 'No, the virtual balance on Pepertect is for paper trading only and cannot be withdrawn or converted to real money. It\'s purely a simulation to help you practice trading strategies and learn about the Indian stock market without any financial risk. When you reset your balance, it simply returns to the default ₹1,00,000.',
+   131→  },
+   132→  {
+   133→    id: 12,
+   134→    category: 'reports',
+   135→    question: 'How do I download my trading report?',
+   136→    answer: 'Go to the Reports page from the sidebar. You\'ll see a "Download Report" section where you can generate three types of PDF reports: Last Trade (single trade details), Monthly Report (last 30 days), and Full Trading Report (all trades). Each PDF includes trade details, P&L summary, brokerage breakdown, and AI-generated analysis.',
+   137→  },
+   138→  {
+   139→    id: 13,
+   140→    category: 'reports',
+   141→    question: 'What metrics are shown in the Reports section?',
+   142→    answer: 'The Reports page shows comprehensive analytics: Total P&L (overall profit/loss), Win Rate (percentage of profitable trades), Average P&L per trade, Total Trades count, Total Brokerage paid, Segment-wise breakdown (Equity, Futures, Options), and a visual P&L chart. You can also see individual trade history with filtering options.',
+   143→  },
+   144→  {
+   145→    id: 14,
+   146→    category: 'trading',
+   147→    question: 'Why was my order rejected?',
+   148→    answer: 'Orders can be rejected for several reasons: Insufficient balance or margin, Market is closed (trading is only allowed during market hours: 9:15 AM - 3:30 PM IST on weekdays), Invalid price for Limit/SL orders, Stock is in F&O ban period, Quantity exceeds allowed limits. The exact rejection reason is always shown in your Orders page.',
+   149→  },
+   150→  {
+   151→    id: 15,
+   152→    category: 'trading',
+   153→    question: 'What is the Option Chain and how do I use it?',
+   154→    answer: 'The Option Chain is a visual tool that shows all available call (CE) and put (PE) options for an index like NIFTY or BANKNIFTY. It displays strike prices, premiums, Open Interest (OI), volume, and Greeks for each strike. To access it, go to any index detail page and click "Option Chain". You can click on any strike price to quickly place an options trade.',
+   155→  },
+   156→]
+   157→
+   158→// ─── Ticket Types ────────────────────────────────────────────────
+   159→
+   160→interface TicketInfo {
+   161→  id: string
+   162→  subject: string
+   163→  message: string
+   164→  category: string
+   165→  priority: string
+   166→  status: string
+   167→  reply: string | null
+   168→  repliedAt: string | null
+   169→  createdAt: string
+   170→}
+   171→
+   172→// ─── Component ───────────────────────────────────────────────────
+   173→
+   174→export function HelpSupportPage() {
+   175→  const { token, user } = useAuthStore()
+   176→  const { setCurrentPage } = useAppStore()
+   177→
+   178→  // Tab state
+   179→  const [activeTab, setActiveTab] = useState<'faq' | 'contact' | 'ticket' | 'myTickets'>('faq')
+   180→
+   181→  // FAQ state
+   182→  const [faqCategory, setFaqCategory] = useState('all')
+   183→  const [expandedFaq, setExpandedFaq] = useState<number | null>(null)
+   184→  const [faqSearch, setFaqSearch] = useState('')
+   185→
+   186→  // Ticket form state
+   187→  const [ticketSubject, setTicketSubject] = useState('')
+   188→  const [ticketMessage, setTicketMessage] = useState('')
+   189→  const [ticketCategory, setTicketCategory] = useState('GENERAL')
+   190→  const [ticketPriority, setTicketPriority] = useState('MEDIUM')
+   191→  const [ticketSubmitting, setTicketSubmitting] = useState(false)
+   192→
+   193→  // My tickets state
+   194→  const [tickets, setTickets] = useState<TicketInfo[]>([])
+   195→  const [ticketsLoading, setTicketsLoading] = useState(false)
+   196→  const [expandedTicket, setExpandedTicket] = useState<string | null>(null)
+   197→
+   198→  // Fetch tickets
+   199→  const fetchTickets = useCallback(async () => {
+   200→    if (!token) return
+   201→    setTicketsLoading(true)
+   202→    try {
+   203→      const res = await fetch('/api/support/tickets', {
+   204→        headers: { Authorization: `Bearer ${token}` },
+   205→      })
+   206→      if (res.ok) {
+   207→        const data = await res.json()
+   208→        setTickets(data.tickets || [])
+   209→      }
+   210→    } catch {
+   211→      // Silent
+   212→    } finally {
+   213→      setTicketsLoading(false)
+   214→    }
+   215→  }, [token])
+   216→
+   217→  useEffect(() => {
+   218→    if (activeTab === 'myTickets') {
+   219→      fetchTickets()
+   220→    }
+   221→  }, [activeTab, fetchTickets])
+   222→
+   223→  // Submit ticket
+   224→  const handleSubmitTicket = async () => {
+   225→    if (!ticketSubject.trim() || !ticketMessage.trim()) {
+   226→      toast.error('Please fill in all fields')
+   227→      return
+   228→    }
+   229→    setTicketSubmitting(true)
+   230→    try {
+   231→      const res = await fetch('/api/support/tickets', {
+   232→        method: 'POST',
+   233→        headers: {
+   234→          'Content-Type': 'application/json',
+   235→          Authorization: `Bearer ${token}`,
+   236→        },
+   237→        body: JSON.stringify({
+   238→          subject: ticketSubject,
+   239→          message: ticketMessage,
+   240→          category: ticketCategory,
+   241→          priority: ticketPriority,
+   242→        }),
+   243→      })
+   244→      if (res.ok) {
+   245→        toast.success('Ticket submitted successfully! We will get back to you soon.')
+   246→        setTicketSubject('')
+   247→        setTicketMessage('')
+   248→        setTicketCategory('GENERAL')
+   249→        setTicketPriority('MEDIUM')
+   250→        setActiveTab('myTickets')
+   251→      } else {
+   252→        const data = await res.json()
+   253→        toast.error(data.error || 'Failed to submit ticket')
+   254→      }
+   255→    } catch {
+   256→      toast.error('Failed to submit ticket')
+   257→    } finally {
+   258→      setTicketSubmitting(false)
+   259→    }
+   260→  }
+   261→
+   262→  // Close ticket
+   263→  const handleCloseTicket = async (ticketId: string) => {
+   264→    try {
+   265→      const res = await fetch(`/api/support/tickets/${ticketId}`, {
+   266→        method: 'DELETE',
+   267→        headers: { Authorization: `Bearer ${token}` },
+   268→      })
+   269→      if (res.ok) {
+   270→        toast.success('Ticket closed successfully')
+   271→        fetchTickets()
+   272→      }
+   273→    } catch {
+   274→      toast.error('Failed to close ticket')
+   275→    }
+   276→  }
+   277→
+   278→  // Filtered FAQs
+   279→  const filteredFaqs = FAQ_DATA.filter(faq => {
+   280→    const matchesCategory = faqCategory === 'all' || faq.category === faqCategory
+   281→    const matchesSearch = !faqSearch || faq.question.toLowerCase().includes(faqSearch.toLowerCase()) || faq.answer.toLowerCase().includes(faqSearch.toLowerCase())
+   282→    return matchesCategory && matchesSearch
+   283→  })
+   284→
+   285→  let si = 0
+   286→
+   287→  return (
+   288→    <div className="p-4 sm:p-6 lg:p-8 space-y-6 max-w-3xl mx-auto bg-background min-h-screen">
+   289→      {/* ── Header ──────────────────────────────────────────── */}
+   290→      <motion.div custom={si++} variants={fadeInUp} initial="hidden" animate="visible">
+   291→        <div className="flex items-center gap-3 mb-1">
+   292→          <button
+   293→            onClick={() => setCurrentPage('profile')}
+   294→            className="size-9 rounded-lg bg-card border border-border flex items-center justify-center hover:bg-muted transition-colors"
+   295→          >
+   296→            <ArrowLeft className="size-4 text-muted-foreground" />
+   297→          </button>
+   298→          <div className="flex items-center gap-2.5">
+   299→            <div className="size-9 rounded-lg bg-[#5367ff]/10 flex items-center justify-center">
+   300→              <HelpCircle className="size-5 text-[#5367ff]" />
+   301→            </div>
+   302→            <div>
+   303→              <h1 className="text-lg font-bold text-foreground">Help & Support</h1>
+   304→              <p className="text-xs text-muted-foreground">We&apos;re here to help you</p>
+   305→            </div>
+   306→          </div>
+   307→        </div>
+   308→      </motion.div>
+   309→
+   310→      {/* ── Quick Actions ────────────────────────────────────── */}
+   311→      <motion.div custom={si++} variants={fadeInUp} initial="hidden" animate="visible">
+   312→        <div className="grid grid-cols-3 gap-3">
+   313→          <button
+   314→            onClick={() => setActiveTab('faq')}
+   315→            className={cn(
+   316→              "flex flex-col items-center gap-2 p-4 rounded-2xl border-2 transition-all",
+   317→              activeTab === 'faq'
+   318→                ? "border-[#5367ff] bg-[#5367ff]/5"
+   319→                : "border-border bg-card hover:border-[#5367ff]/30 hover:bg-[#5367ff]/5"
+   320→            )}
+   321→          >
+   322→            <div className={cn(
+   323→              "size-10 rounded-xl flex items-center justify-center",
+   324→              activeTab === 'faq' ? "bg-[#5367ff]" : "bg-[#5367ff]/10"
+   325→            )}>
+   326→              <HelpCircle className={cn("size-5", activeTab === 'faq' ? "text-white" : "text-[#5367ff]")} />
+   327→            </div>
+   328→            <div className="text-center">
+   329→              <p className={cn("text-xs font-semibold", activeTab === 'faq' ? "text-[#5367ff]" : "text-foreground")}>FAQ</p>
+   330→              <p className="text-[10px] text-muted-foreground mt-0.5">Quick answers</p>
+   331→            </div>
+   332→          </button>
+   333→
+   334→          <button
+   335→            onClick={() => setActiveTab('contact')}
+   336→            className={cn(
+   337→              "flex flex-col items-center gap-2 p-4 rounded-2xl border-2 transition-all",
+   338→              activeTab === 'contact'
+   339→                ? "border-[#00D09C] bg-[#00D09C]/5"
+   340→                : "border-border bg-card hover:border-[#00D09C]/30 hover:bg-[#00D09C]/5"
+   341→            )}
+   342→          >
+   343→            <div className={cn(
+   344→              "size-10 rounded-xl flex items-center justify-center",
+   345→              activeTab === 'contact' ? "bg-[#00D09C]" : "bg-[#00D09C]/10"
+   346→            )}>
+   347→              <MessageSquare className={cn("size-5", activeTab === 'contact' ? "text-white" : "text-[#00D09C]")} />
+   348→            </div>
+   349→            <div className="text-center">
+   350→              <p className={cn("text-xs font-semibold", activeTab === 'contact' ? "text-[#00D09C]" : "text-foreground")}>Contact</p>
+   351→              <p className="text-[10px] text-muted-foreground mt-0.5">Talk to us</p>
+   352→            </div>
+   353→          </button>
+   354→
+   355→          <button
+   356→            onClick={() => setActiveTab('ticket')}
+   357→            className={cn(
+   358→              "flex flex-col items-center gap-2 p-4 rounded-2xl border-2 transition-all",
+   359→              activeTab === 'ticket' || activeTab === 'myTickets'
+   360→                ? "border-[#f59e0b] bg-[#f59e0b]/5"
+   361→                : "border-border bg-card hover:border-[#f59e0b]/30 hover:bg-[#f59e0b]/5"
+   362→            )}
+   363→          >
+   364→            <div className={cn(
+   365→              "size-10 rounded-xl flex items-center justify-center",
+   366→              activeTab === 'ticket' || activeTab === 'myTickets' ? "bg-[#f59e0b]" : "bg-[#f59e0b]/10"
+   367→            )}>
+   368→              <Ticket className={cn("size-5", activeTab === 'ticket' || activeTab === 'myTickets' ? "text-white" : "text-[#f59e0b]")} />
+   369→            </div>
+   370→            <div className="text-center">
+   371→              <p className={cn("text-xs font-semibold", activeTab === 'ticket' || activeTab === 'myTickets' ? "text-[#f59e0b]" : "text-foreground")}>Ticket</p>
+   372→              <p className="text-[10px] text-muted-foreground mt-0.5">Raise issue</p>
+   373→            </div>
+   374→          </button>
+   375→        </div>
+   376→      </motion.div>
+   377→
+   378→      {/* ── FAQ Section ──────────────────────────────────────── */}
+   379→      {activeTab === 'faq' && (
+   380→        <div className="space-y-4">
+   381→          {/* Search */}
+   382→          <motion.div custom={si++} variants={fadeInUp} initial="hidden" animate="visible">
+   383→            <div className="relative">
+   384→              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+   385→              <input
+   386→                type="text"
+   387→                placeholder="Search questions..."
+   388→                value={faqSearch}
+   389→                onChange={(e) => setFaqSearch(e.target.value)}
+   390→                className="w-full pl-10 pr-4 py-3 rounded-xl border border-border bg-card text-sm focus:border-[#5367ff] focus:ring-[#5367ff]/20 focus:outline-none transition-colors"
+   391→              />
+   392→              {faqSearch && (
+   393→                <button onClick={() => setFaqSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2">
+   394→                  <X className="size-4 text-muted-foreground hover:text-muted-foreground" />
+   395→                </button>
+   396→              )}
+   397→            </div>
+   398→          </motion.div>
+   399→
+   400→          {/* Category Filter */}
+   401→          <motion.div custom={si++} variants={fadeInUp} initial="hidden" animate="visible">
+   402→            <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+   403→              {FAQ_CATEGORIES.map(cat => (
+   404→                <button
+   405→                  key={cat.id}
+   406→                  onClick={() => setFaqCategory(cat.id)}
+   407→                  className={cn(
+   408→                    "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all shrink-0",
+   409→                    faqCategory === cat.id
+   410→                      ? "bg-[#5367ff] text-white"
+   411→                      : "bg-card border border-border text-muted-foreground hover:border-[#5367ff]/30"
+   412→                  )}
+   413→                >
+   414→                  <cat.icon className="size-3" />
+   415→                  {cat.label}
+   416→                </button>
+   417→              ))}
+   418→            </div>
+   419→          </motion.div>
+   420→
+   421→          {/* FAQ List */}
+   422→          <div className="space-y-2">
+   423→            {filteredFaqs.length === 0 ? (
+   424→              <motion.div custom={si++} variants={fadeInUp} initial="hidden" animate="visible">
+   425→                <div className="bg-card border border-border rounded-2xl p-8 text-center">
+   426→                  <Search className="size-8 text-muted-foreground mx-auto mb-2" />
+   427→                  <p className="text-sm font-semibold text-foreground">No questions found</p>
+   428→                  <p className="text-xs text-muted-foreground mt-1">Try a different search or category</p>
+   429→                </div>
+   430→              </motion.div>
+   431→            ) : (
+   432→              filteredFaqs.map((faq) => (
+   433→                <motion.div key={faq.id} custom={si++} variants={fadeInUp} initial="hidden" animate="visible">
+   434→                  <div className="bg-card border border-border rounded-2xl overflow-hidden transition-all hover:border-[#5367ff]/20">
+   435→                    <button
+   436→                      onClick={() => setExpandedFaq(expandedFaq === faq.id ? null : faq.id)}
+   437→                      className="w-full p-4 flex items-start gap-3 text-left"
+   438→                    >
+   439→                      <div className={cn(
+   440→                        "size-6 rounded-full flex items-center justify-center shrink-0 mt-0.5 transition-colors",
+   441→                        expandedFaq === faq.id ? "bg-[#5367ff]" : "bg-[#5367ff]/10"
+   442→                      )}>
+   443→                        {expandedFaq === faq.id ? (
+   444→                          <ChevronUp className="size-3.5 text-white" />
+   445→                        ) : (
+   446→                          <ChevronDown className="size-3.5 text-[#5367ff]" />
+   447→                        )}
+   448→                      </div>
+   449→                      <div className="flex-1">
+   450→                        <p className="text-sm font-semibold text-foreground pr-2">{faq.question}</p>
+   451→                      </div>
+   452→                      <Badge className={cn(
+   453→                        "border-0 text-[9px] px-1.5 py-0 font-bold shrink-0",
+   454→                        faq.category === 'account' ? "bg-[#5367ff]/10 text-[#5367ff]" :
+   455→                        faq.category === 'trading' ? "bg-[#00D09C]/10 text-[#00D09C]" :
+   456→                        faq.category === 'funds' ? "bg-[#f59e0b]/10 text-[#f59e0b]" :
+   457→                        "bg-[#6b7280]/10 text-muted-foreground"
+   458→                      )}>
+   459→                        {faq.category}
+   460→                      </Badge>
+   461→                    </button>
+   462→                    {expandedFaq === faq.id && (
+   463→                      <motion.div
+   464→                        initial={{ opacity: 0, height: 0 }}
+   465→                        animate={{ opacity: 1, height: 'auto' }}
+   466→                        className="px-4 pb-4"
+   467→                      >
+   468→                        <div className="pl-9 pt-2 border-t border-border/50">
+   469→                          <p className="text-sm text-muted-foreground leading-relaxed">{faq.answer}</p>
+   470→                        </div>
+   471→                      </motion.div>
+   472→                    )}
+   473→                  </div>
+   474→                </motion.div>
+   475→              ))
+   476→            )}
+   477→          </div>
+   478→
+   479→          <motion.div custom={si++} variants={fadeInUp} initial="hidden" animate="visible">
+   480→            <p className="text-center text-xs text-muted-foreground">
+   481→              {FAQ_DATA.length} questions available • {filteredFaqs.length} shown
+   482→            </p>
+   483→          </motion.div>
+   484→        </div>
+   485→      )}
+   486→
+   487→      {/* ── Contact Support Section ──────────────────────────── */}
+   488→      {activeTab === 'contact' && (
+   489→        <div className="space-y-4">
+   490→          {/* Contact Cards */}
+   491→          <motion.div custom={si++} variants={fadeInUp} initial="hidden" animate="visible">
+   492→            <div className="bg-card border border-border rounded-2xl shadow-sm p-5">
+   493→              <div className="flex items-center gap-2 mb-4">
+   494→                <MessageSquare className="size-5 text-[#00D09C]" />
+   495→                <h2 className="text-base font-bold text-foreground">Get in Touch</h2>
+   496→              </div>
+   497→              <p className="text-sm text-muted-foreground mb-5">
+   498→                Our support team is available to help you with any questions or issues. Choose your preferred method to reach us.
+   499→              </p>
+   500→
+   501→              <div className="space-y-3">
+   502→                {/* Email */}
+   503→                <div className="flex items-center gap-4 p-4 rounded-xl bg-card border border-border">
+   504→                  <div className="size-11 rounded-xl bg-[#5367ff]/10 flex items-center justify-center shrink-0">
+   505→                    <Mail className="size-5 text-[#5367ff]" />
+   506→                  </div>
+   507→                  <div className="flex-1 min-w-0">
+   508→                    <p className="text-sm font-semibold text-foreground">Email Support</p>
+   509→                    <p className="text-xs text-muted-foreground mt-0.5">support@pepertect.in</p>
+   510→                    <p className="text-[10px] text-muted-foreground mt-0.5">We typically respond within 24 hours</p>
+   511→                  </div>
+   512→                  <a
+   513→                    href="mailto:support@pepertect.in"
+   514→                    className="px-3 py-1.5 rounded-lg bg-[#5367ff] text-white text-xs font-semibold hover:bg-[#4356e0] transition-colors"
+   515→                  >
+   516→                    Email Us
+   517→                  </a>
+   518→                </div>
+   519→
+   520→                {/* Phone */}
+   521→                <div className="flex items-center gap-4 p-4 rounded-xl bg-card border border-border">
+   522→                  <div className="size-11 rounded-xl bg-[#00D09C]/10 flex items-center justify-center shrink-0">
+   523→                    <Phone className="size-5 text-[#00D09C]" />
+   524→                  </div>
+   525→                  <div className="flex-1 min-w-0">
+   526→                    <p className="text-sm font-semibold text-foreground">Phone Support</p>
+   527→                    <p className="text-xs text-muted-foreground mt-0.5">+91 98765 43210</p>
+   528→                    <p className="text-[10px] text-muted-foreground mt-0.5">Mon-Fri, 9:00 AM - 6:00 PM IST</p>
+   529→                  </div>
+   530→                  <a
+   531→                    href="tel:+919876543210"
+   532→                    className="px-3 py-1.5 rounded-lg bg-[#00D09C] text-white text-xs font-semibold hover:bg-[#00b88a] transition-colors"
+   533→                  >
+   534→                    Call Us
+   535→                  </a>
+   536→                </div>
+   537→
+   538→                {/* Live Chat */}
+   539→                <div className="flex items-center gap-4 p-4 rounded-xl bg-card border border-border">
+   540→                  <div className="size-11 rounded-xl bg-[#f59e0b]/10 flex items-center justify-center shrink-0">
+   541→                    <MessageSquare className="size-5 text-[#f59e0b]" />
+   542→                  </div>
+   543→                  <div className="flex-1 min-w-0">
+   544→                    <p className="text-sm font-semibold text-foreground">Live Chat</p>
+   545→                    <p className="text-xs text-muted-foreground mt-0.5">Chat with our team in real-time</p>
+   546→                    <p className="text-[10px] text-muted-foreground mt-0.5">Available during market hours</p>
+   547→                  </div>
+   548→                  <button
+   549→                    onClick={() => toast.info('Live chat is not available yet.')}
+   550→                    className="px-3 py-1.5 rounded-lg bg-[#f59e0b] text-white text-xs font-semibold hover:bg-[#d97706] transition-colors"
+   551→                  >
+   552→                    Chat Now
+   553→                  </button>
+   554→                </div>
+   555→              </div>
+   556→            </div>
+   557→          </motion.div>
+   558→
+   559→          {/* Support Hours */}
+   560→          <motion.div custom={si++} variants={fadeInUp} initial="hidden" animate="visible">
+   561→            <div className="bg-card border border-border rounded-2xl shadow-sm p-5">
+   562→              <div className="flex items-center gap-2 mb-4">
+   563→                <Clock className="size-5 text-[#5367ff]" />
+   564→                <h2 className="text-sm font-bold text-foreground">Support Hours</h2>
+   565→              </div>
+   566→              <div className="space-y-2">
+   567→                <div className="flex items-center justify-between py-2 px-3 rounded-lg bg-card">
+   568→                  <span className="text-xs text-muted-foreground">Monday - Friday</span>
+   569→                  <span className="text-xs font-semibold text-foreground">9:00 AM - 6:00 PM IST</span>
+   570→                </div>
+   571→                <div className="flex items-center justify-between py-2 px-3 rounded-lg bg-card">
+   572→                  <span className="text-xs text-muted-foreground">Saturday</span>
+   573→                  <span className="text-xs font-semibold text-foreground">10:00 AM - 2:00 PM IST</span>
+   574→                </div>
+   575→                <div className="flex items-center justify-between py-2 px-3 rounded-lg bg-card">
+   576→                  <span className="text-xs text-muted-foreground">Sunday & Holidays</span>
+   577→                  <span className="text-xs font-semibold text-[#EB5B3C]">Closed</span>
+   578→                </div>
+   579→              </div>
+   580→              <div className="mt-3 p-3 rounded-xl bg-[#e6faf4] border border-[#00D09C]/10 flex items-start gap-2">
+   581→                <CheckCircle2 className="size-4 text-[#00D09C] shrink-0 mt-0.5" />
+   582→                <p className="text-[11px] text-muted-foreground">
+   583→                  Email support is available 24/7. We aim to respond within 24 hours on business days.
+   584→                </p>
+   585→              </div>
+   586→            </div>
+   587→          </motion.div>
+   588→        </div>
+   589→      )}
+   590→
+   591→      {/* ── Raise a Ticket Section ───────────────────────────── */}
+   592→      {activeTab === 'ticket' && (
+   593→        <div className="space-y-4">
+   594→          <motion.div custom={si++} variants={fadeInUp} initial="hidden" animate="visible">
+   595→            <div className="bg-card border border-border rounded-2xl shadow-sm p-5">
+   596→              <div className="flex items-center justify-between mb-4">
+   597→                <div className="flex items-center gap-2">
+   598→                  <Ticket className="size-5 text-[#f59e0b]" />
+   599→                  <h2 className="text-base font-bold text-foreground">Raise a Ticket</h2>
+   600→                </div>
+   601→                {tickets.length > 0 && (
+   602→                  <button
+   603→                    onClick={() => setActiveTab('myTickets')}
+   604→                    className="text-xs font-semibold text-[#5367ff] hover:text-[#4356e0] flex items-center gap-1"
+   605→                  >
+   606→                    View My Tickets ({tickets.length}) <ChevronRight className="size-3" />
+   607→                  </button>
+   608→                )}
+   609→              </div>
+   610→
+   611→              <div className="space-y-4">
+   612→                {/* Category */}
+   613→                <div className="space-y-2">
+   614→                  <label className="text-xs font-semibold text-foreground uppercase tracking-wider">Category</label>
+   615→                  <div className="grid grid-cols-5 gap-2">
+   616→                    {[
+   617→                      { value: 'GENERAL', label: 'General', icon: HelpCircle },
+   618→                      { value: 'BUG', label: 'Bug', icon: AlertCircle },
+   619→                      { value: 'FEATURE', label: 'Feature', icon: TrendingUp },
+   620→                      { value: 'ACCOUNT', label: 'Account', icon: Shield },
+   621→                      { value: 'TRADING', label: 'Trading', icon: BookOpen },
+   622→                    ].map(cat => (
+   623→                      <button
+   624→                        key={cat.value}
+   625→                        onClick={() => setTicketCategory(cat.value)}
+   626→                        className={cn(
+   627→                          "flex flex-col items-center gap-1 py-2.5 px-2 rounded-xl border-2 text-xs font-semibold transition-all",
+   628→                          ticketCategory === cat.value
+   629→                            ? "border-[#5367ff] bg-[#5367ff]/5 text-[#5367ff]"
+   630→                            : "border-border text-muted-foreground hover:border-[#5367ff]/30"
+   631→                        )}
+   632→                      >
+   633→                        <cat.icon className="size-4" />
+   634→                        {cat.label}
+   635→                      </button>
+   636→                    ))}
+   637→                  </div>
+   638→                </div>
+   639→
+   640→                {/* Priority */}
+   641→                <div className="space-y-2">
+   642→                  <label className="text-xs font-semibold text-foreground uppercase tracking-wider">Priority</label>
+   643→                  <div className="grid grid-cols-4 gap-2">
+   644→                    {[
+   645→                      { value: 'LOW', label: 'Low', color: '#6b7280' },
+   646→                      { value: 'MEDIUM', label: 'Medium', color: '#f59e0b' },
+   647→                      { value: 'HIGH', label: 'High', color: '#f97316' },
+   648→                      { value: 'URGENT', label: 'Urgent', color: '#EB5B3C' },
+   649→                    ].map(pri => (
+   650→                      <button
+   651→                        key={pri.value}
+   652→                        onClick={() => setTicketPriority(pri.value)}
+   653→                        className={cn(
+   654→                          "py-2 rounded-xl border-2 text-xs font-semibold transition-all",
+   655→                          ticketPriority === pri.value
+   656→                            ? "border-[currentColor] bg-opacity-5"
+   657→                            : "border-border text-muted-foreground hover:border-border/80"
+   658→                        )}
+   659→                        style={ticketPriority === pri.value ? { borderColor: pri.color, color: pri.color, backgroundColor: `${pri.color}08` } : {}}
+   660→                      >
+   661→                        {pri.label}
+   662→                      </button>
+   663→                    ))}
+   664→                  </div>
+   665→                </div>
+   666→
+   667→                {/* Subject */}
+   668→                <div className="space-y-2">
+   669→                  <label className="text-xs font-semibold text-foreground uppercase tracking-wider">Subject</label>
+   670→                  <input
+   671→                    type="text"
+   672→                    value={ticketSubject}
+   673→                    onChange={(e) => setTicketSubject(e.target.value)}
+   674→                    placeholder="Brief description of your issue"
+   675→                    className="w-full px-4 py-3 rounded-xl border border-border bg-card text-sm focus:border-[#5367ff] focus:ring-[#5367ff]/20 focus:outline-none transition-colors"
+   676→                  />
+   677→                </div>
+   678→
+   679→                {/* Message */}
+   680→                <div className="space-y-2">
+   681→                  <label className="text-xs font-semibold text-foreground uppercase tracking-wider">Message</label>
+   682→                  <textarea
+   683→                    value={ticketMessage}
+   684→                    onChange={(e) => setTicketMessage(e.target.value)}
+   685→                    rows={5}
+   686→                    placeholder="Describe your issue in detail. Include steps to reproduce if it's a bug, or specific details if it's a feature request..."
+   687→                    className="w-full px-4 py-3 rounded-xl border border-border bg-card text-sm focus:border-[#5367ff] focus:ring-[#5367ff]/20 focus:outline-none resize-none transition-colors"
+   688→                  />
+   689→                  <p className="text-[10px] text-muted-foreground">{ticketMessage.length}/1000 characters</p>
+   690→                </div>
+   691→
+   692→                {/* Submit */}
+   693→                <Button
+   694→                  onClick={handleSubmitTicket}
+   695→                  disabled={ticketSubmitting || !ticketSubject.trim() || !ticketMessage.trim()}
+   696→                  className="w-full bg-[#5367ff] hover:bg-[#4356e0] text-white font-semibold rounded-xl h-12 gap-2"
+   697→                >
+   698→                  {ticketSubmitting ? (
+   699→                    <><Loader2 className="size-4 animate-spin" /> Submitting...</>
+   700→                  ) : (
+   701→                    <><Send className="size-4" /> Submit Ticket</>
+   702→                  )}
+   703→                </Button>
+   704→              </div>
+   705→            </div>
+   706→          </motion.div>
+   707→
+   708→          {/* Tips */}
+   709→          <motion.div custom={si++} variants={fadeInUp} initial="hidden" animate="visible">
+   710→            <div className="p-4 rounded-2xl bg-card border border-border">
+   711→              <p className="text-xs font-semibold text-foreground mb-2">Tips for faster resolution</p>
+   712→              <div className="space-y-1.5">
+   713→                {[
+   714→                  'Include screenshots or error messages if reporting a bug',
+   715→                  'Mention the exact steps you took before the issue occurred',
+   716→                  'Specify your browser and device type',
+   717→                  'For feature requests, describe the use case and expected behavior',
+   718→                ].map((tip, i) => (
+   719→                  <div key={i} className="flex items-start gap-2">
+   720→                    <ChevronRight className="size-3 text-[#5367ff] shrink-0 mt-1" />
+   721→                    <p className="text-[11px] text-muted-foreground">{tip}</p>
+   722→                  </div>
+   723→                ))}
+   724→              </div>
+   725→            </div>
+   726→          </motion.div>
+   727→        </div>
+   728→      )}
+   729→
+   730→      {/* ── My Tickets Section ───────────────────────────────── */}
+   731→      {activeTab === 'myTickets' && (
+   732→        <div className="space-y-4">
+   733→          <motion.div custom={si++} variants={fadeInUp} initial="hidden" animate="visible">
+   734→            <div className="flex items-center justify-between">
+   735→              <h2 className="text-sm font-bold text-foreground">My Tickets</h2>
+   736→              <button
+   737→                onClick={() => setActiveTab('ticket')}
+   738→                className="text-xs font-semibold text-[#5367ff] hover:text-[#4356e0] flex items-center gap-1"
+   739→              >
+   740→                <Ticket className="size-3" /> Raise New Ticket
+   741→              </button>
+   742→            </div>
+   743→          </motion.div>
+   744→
+   745→          {ticketsLoading ? (
+   746→            <div className="space-y-3">
+   747→              {[1, 2].map(i => (
+   748→                <div key={i} className="bg-card border border-border rounded-2xl p-5">
+   749→                  <div className="flex items-center gap-4">
+   750→                    <Skeleton className="size-10 rounded-xl" />
+   751→                    <div className="flex-1 space-y-2">
+   752→                      <Skeleton className="h-4 w-40" />
+   753→                      <Skeleton className="h-3 w-60" />
+   754→                    </div>
+   755→                  </div>
+   756→                </div>
+   757→              ))}
+   758→            </div>
+   759→          ) : tickets.length === 0 ? (
+   760→            <motion.div custom={si++} variants={fadeInUp} initial="hidden" animate="visible">
+   761→              <div className="bg-card border border-border rounded-2xl p-8 text-center">
+   762→                <div className="size-14 rounded-full bg-muted flex items-center justify-center mx-auto mb-3">
+   763→                  <Ticket className="size-7 text-muted-foreground" />
+   764→                </div>
+   765→                <p className="text-sm font-semibold text-foreground">No tickets yet</p>
+   766→                <p className="text-xs text-muted-foreground mt-1">
+   767→                  You haven&apos;t raised any support tickets. Click below to create one.
+   768→                </p>
+   769→                <Button
+   770→                  onClick={() => setActiveTab('ticket')}
+   771→                  className="mt-4 bg-[#5367ff] hover:bg-[#4356e0] text-white text-xs font-semibold gap-1.5"
+   772→                  size="sm"
+   773→                >
+   774→                  <Ticket className="size-3.5" /> Raise a Ticket
+   775→                </Button>
+   776→              </div>
+   777→            </motion.div>
+   778→          ) : (
+   779→            tickets.map((ticket) => (
+   780→              <motion.div key={ticket.id} custom={si++} variants={fadeInUp} initial="hidden" animate="visible">
+   781→                <div className="bg-card border border-border rounded-2xl shadow-sm overflow-hidden">
+   782→                  <div className="p-4">
+   783→                    <div className="flex items-start gap-3">
+   784→                      <div className={cn(
+   785→                        "size-10 rounded-xl flex items-center justify-center shrink-0",
+   786→                        ticket.status === 'OPEN' ? "bg-[#f59e0b]/10" :
+   787→                        ticket.status === 'IN_PROGRESS' ? "bg-[#5367ff]/10" :
+   788→                        ticket.status === 'RESOLVED' ? "bg-[#00D09C]/10" :
+   789→                        "bg-muted"
+   790→                      )}>
+   791→                        {ticket.status === 'OPEN' ? (
+   792→                          <AlertCircle className="size-5 text-[#f59e0b]" />
+   793→                        ) : ticket.status === 'IN_PROGRESS' ? (
+   794→                          <Loader2 className="size-5 text-[#5367ff]" />
+   795→                        ) : (
+   796→                          <CheckCircle2 className="size-5 text-[#00D09C]" />
+   797→                        )}
+   798→                      </div>
+   799→                      <div className="flex-1 min-w-0">
+   800→                        <div className="flex items-center gap-2">
+   801→                          <p className="text-sm font-semibold text-foreground truncate">{ticket.subject}</p>
+   802→                        </div>
+   803→                        <div className="flex items-center gap-2 mt-1 flex-wrap">
+   804→                          <Badge className={cn(
+   805→                            "border-0 text-[9px] px-1.5 py-0 font-bold",
+   806→                            ticket.status === 'OPEN' ? "bg-[#f59e0b]/10 text-[#f59e0b]" :
+   807→                            ticket.status === 'IN_PROGRESS' ? "bg-[#5367ff]/10 text-[#5367ff]" :
+   808→                            ticket.status === 'RESOLVED' ? "bg-[#00D09C]/10 text-[#00D09C]" :
+   809→                            "bg-[#6b7280]/10 text-muted-foreground"
+   810→                          )}>
+   811→                            {ticket.status === 'OPEN' ? 'Open' :
+   812→                             ticket.status === 'IN_PROGRESS' ? 'In Progress' :
+   813→                             ticket.status === 'RESOLVED' ? 'Resolved' : 'Closed'}
+   814→                          </Badge>
+   815→                          <Badge className="bg-muted text-muted-foreground border-0 text-[9px] px-1.5 py-0 font-bold">
+   816→                            {ticket.category}
+   817→                          </Badge>
+   818→                          <span className="text-[10px] text-muted-foreground">
+   819→                            {new Date(ticket.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+   820→                          </span>
+   821→                        </div>
+   822→                      </div>
+   823→                      <button
+   824→                        onClick={() => setExpandedTicket(expandedTicket === ticket.id ? null : ticket.id)}
+   825→                        className="p-1"
+   826→                      >
+   827→                        <ChevronRight className={cn(
+   828→                          "size-4 text-muted-foreground transition-transform",
+   829→                          expandedTicket === ticket.id && "rotate-90"
+   830→                        )} />
+   831→                      </button>
+   832→                    </div>
+   833→
+   834→                    {expandedTicket === ticket.id && (
+   835→                      <motion.div
+   836→                        initial={{ opacity: 0, height: 0 }}
+   837→                        animate={{ opacity: 1, height: 'auto' }}
+   838→                        className="mt-3 pt-3 border-t border-border/50 space-y-3"
+   839→                      >
+   840→                        <div className="p-3 rounded-xl bg-card">
+   841→                          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Your Message</p>
+   842→                          <p className="text-sm text-foreground">{ticket.message}</p>
+   843→                        </div>
+   844→
+   845→                        {ticket.reply && (
+   846→                          <div className="p-3 rounded-xl bg-[#e6faf4] border border-[#00D09C]/10">
+   847→                            <div className="flex items-center gap-1.5 mb-1">
+   848→                              <CheckCircle2 className="size-3 text-[#00D09C]" />
+   849→                              <p className="text-xs font-semibold text-[#00D09C] uppercase tracking-wider">Support Reply</p>
+   850→                            </div>
+   851→                            <p className="text-sm text-foreground">{ticket.reply}</p>
+   852→                            {ticket.repliedAt && (
+   853→                              <p className="text-[10px] text-muted-foreground mt-1">
+   854→                                Replied on {new Date(ticket.repliedAt).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+   855→                              </p>
+   856→                            )}
+   857→                          </div>
+   858→                        )}
+   859→
+   860→                        {ticket.status === 'OPEN' && (
+   861→                          <Button
+   862→                            variant="outline"
+   863→                            size="sm"
+   864→                            onClick={() => handleCloseTicket(ticket.id)}
+   865→                            className="w-full text-xs font-semibold text-[#EB5B3C] border-[#eb5b3c]/20 hover:bg-[#EB5B3C]/5"
+   866→                          >
+   867→                            Close Ticket
+   868→                          </Button>
+   869→                        )}
+   870→                      </motion.div>
+   871→                    )}
+   872→                  </div>
+   873→                </div>
+   874→              </motion.div>
+   875→            ))
+   876→          )}
+   877→        </div>
+   878→      )}
+   879→    </div>
+   880→  )
+   881→}
+   882→

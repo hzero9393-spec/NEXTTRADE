@@ -1,0 +1,786 @@
+'use client'
+
+import { useState, useEffect, useCallback, useMemo } from 'react'
+import {
+  Card,
+  CardContent,
+} from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Skeleton } from '@/components/ui/skeleton'
+import {
+  TrendingUp,
+  TrendingDown,
+  ArrowUpRight,
+  ArrowDownRight,
+  Activity,
+  Flame,
+  BarChart3,
+  ChevronRight,
+  ChevronDown,
+  ChevronUp,
+  CandlestickChart,
+  Clock,
+  Calendar,
+  Circle,
+  Minus,
+  RefreshCw,
+  Zap,
+  WifiOff,
+} from 'lucide-react'
+import { useAppStore } from '@/lib/store'
+import { formatPrice, formatPercent } from '@/lib/format'
+import { cn } from '@/lib/utils'
+import { motion, AnimatePresence } from 'framer-motion'
+import { useIndexData, useStockData, useMarketDataStatus, useDerivedData, type DerivedMarketData, type WsIndexQuote, type WsStockQuote } from '@/hooks/use-market-data'
+
+// ─── Types ──────────────────────────────────────────────────────────────────
+
+interface IndexData {
+  id: string
+  symbol: string
+  name: string
+  currentPrice: number
+  change: number
+  changePercent: number
+  isEnabled: boolean
+  isRealData?: boolean
+  dataSource?: string
+}
+
+interface StockData {
+  id: string
+  symbol: string
+  name: string
+  sector: string
+  currentPrice: number
+  change: number
+  changePercent: number
+  volume?: number
+  marketCap?: number
+  isFuturesAvailable: boolean
+  isOptionsAvailable: boolean
+}
+
+interface MarketStatusData {
+  status: 'OPEN' | 'CLOSED' | 'PRE-OPEN' | 'POST-CLOSE'
+  message: string
+  istTime: string
+  nextOpen: string | null
+}
+
+interface MarketBreadthData {
+  id: string
+  date: string
+  advances: number
+  declines: number
+  unchanged: number
+  week52Highs?: number
+  week52Lows?: number
+}
+
+interface HolidayData {
+  id: string
+  name: string
+  date: string
+  isMuhurat: boolean
+  muhuratStart: string | null
+  muhuratEnd: string | null
+}
+
+interface SectorData {
+  id: string
+  name: string
+  indexSymbol?: string
+  todayChange: number
+  topStockSymbol?: string
+  topStockChange?: number
+  isActive: boolean
+}
+
+// ─── Constants ──────────────────────────────────────────────────────────────
+
+const TARGET_INDICES = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'SENSEX']
+
+// ─── Breadth Bar Component ──────────────────────────────────────────────────
+
+function BreadthBar({ breadth }: { breadth: MarketBreadthData }) {
+  const total = breadth.advances + breadth.declines + breadth.unchanged
+  const advPct = total > 0 ? (breadth.advances / total) * 100 : 0
+  const unchPct = total > 0 ? (breadth.unchanged / total) * 100 : 0
+  const decPct = total > 0 ? (breadth.declines / total) * 100 : 0
+  return (
+    <div className="mb-3">
+      <div className="flex h-3 w-full overflow-hidden rounded-full bg-background">
+        {total > 0 && (
+          <>
+            <div className="bg-[#00B386] transition-all duration-500" style={{ width: `${advPct}%` }} />
+            <div className="bg-[#6b7280] transition-all duration-500" style={{ width: `${unchPct}%` }} />
+            <div className="bg-[#EB5B3C] transition-all duration-500" style={{ width: `${decPct}%` }} />
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ─── Stock Row Component ────────────────────────────────────────────────────
+
+function StockRow({ stock, onClick }: { stock: StockData; onClick: () => void }) {
+  const isPositive = stock.changePercent >= 0
+  return (
+    <div
+      onClick={onClick}
+      className="flex items-center justify-between py-3 px-3 hover:bg-background rounded-lg cursor-pointer transition-colors group"
+    >
+      <div className="flex items-center gap-3 min-w-0 flex-1">
+        <div className={cn(
+          'size-9 rounded-lg flex items-center justify-center shrink-0',
+          isPositive ? 'bg-[#00B386]/8' : 'bg-[#EB5B3C]/8'
+        )}>
+          <span className={cn('text-[10px] font-bold', isPositive ? 'text-[#00B386]' : 'text-[#EB5B3C]')}>
+            {stock.symbol.substring(0, 2)}
+          </span>
+        </div>
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5">
+            <span className="font-bold text-sm text-foreground truncate">{stock.symbol}</span>
+            {stock.isFuturesAvailable && stock.isOptionsAvailable && (
+              <Badge variant="outline" className="text-[8px] px-1 py-0 h-3.5 font-bold border-[#00D09C]/30 text-[#00D09C] bg-[#00D09C]/5">
+                F&O
+              </Badge>
+            )}
+          </div>
+          <p className="text-[11px] text-muted-foreground truncate">{stock.name}</p>
+        </div>
+      </div>
+      <div className="text-right shrink-0 ml-3 flex items-center gap-2">
+        <div>
+          <div className="text-sm font-bold font-mono text-foreground">
+            ₹{formatPrice(stock.currentPrice)}
+          </div>
+          <div className={cn('flex items-center justify-end gap-1 text-xs font-semibold',
+            isPositive ? 'text-[#00B386]' : 'text-[#EB5B3C]'
+          )}>
+            {isPositive ? <ArrowUpRight className="size-3" /> : <ArrowDownRight className="size-3" />}
+            <span>{stock.change >= 0 ? '+' : ''}{formatPrice(stock.change)}</span>
+            <span className={cn('text-[10px] px-1.5 py-0.5 rounded',
+              isPositive ? 'bg-[#00B386]/10' : 'bg-[#EB5B3C]/10'
+            )}>
+              {formatPercent(stock.changePercent)}
+            </span>
+          </div>
+        </div>
+        <ChevronRight className="size-4 text-muted-foreground group-hover:text-muted-foreground shrink-0 transition-colors" />
+      </div>
+    </div>
+  )
+}
+
+// ─── Main Component ─────────────────────────────────────────────────────────
+
+export function DashboardPage() {
+  const { navigateToStock, navigateToIndex } = useAppStore()
+
+  // Data states (indices metadata from REST, everything else from WebSocket)
+  const [indices, setIndices] = useState<IndexData[]>([])
+  const [holidays, setHolidays] = useState<HolidayData[]>([])
+  const [holidaysLoading, setHolidaysLoading] = useState(true)
+  const [holidaysOpen, setHolidaysOpen] = useState(false)
+  const [indicesLoading, setIndicesLoading] = useState(true)
+
+  // Refresh state
+  const [lastRefreshed, setLastRefreshed] = useState<Date>(new Date())
+  const [isRefreshing, setIsRefreshing] = useState(false)
+
+  // WebSocket real-time data
+  const { indices: wsIndices, status: wsIndexStatus } = useIndexData()
+  const { stocks: wsStocks, status: wsStockStatus } = useStockData()
+  const wsConnectionStatus = useMarketDataStatus()
+  const isWsConnected = wsConnectionStatus === 'connected'
+
+  // Derived market data from WebSocket (gainers, losers, breadth, status, sectors)
+  const { derived } = useDerivedData()
+
+  // ─── Map WS derived data to existing interfaces ──────────────
+  const apiGainers: StockData[] = useMemo(() => {
+    if (!derived?.gainers?.length) return []
+    return derived.gainers.map((g, i) => ({
+      id: `gainer-${i}`,
+      symbol: g.symbol,
+      name: g.name,
+      sector: '',
+      currentPrice: g.currentPrice,
+      change: g.change,
+      changePercent: g.changePercent,
+      volume: g.volume ?? undefined,
+      isFuturesAvailable: false,
+      isOptionsAvailable: false,
+    }))
+  }, [derived?.gainers])
+
+  const apiLosers: StockData[] = useMemo(() => {
+    if (!derived?.losers?.length) return []
+    return derived.losers.map((l, i) => ({
+      id: `loser-${i}`,
+      symbol: l.symbol,
+      name: l.name,
+      sector: '',
+      currentPrice: l.currentPrice,
+      change: l.change,
+      changePercent: l.changePercent,
+      volume: l.volume ?? undefined,
+      isFuturesAvailable: false,
+      isOptionsAvailable: false,
+    }))
+  }, [derived?.losers])
+
+  const marketBreadth: MarketBreadthData | null = useMemo(() => {
+    if (!derived?.breadth) return null
+    return {
+      id: 'breadth',
+      date: new Date().toISOString().split('T')[0],
+      advances: derived.breadth.advances,
+      declines: derived.breadth.declines,
+      unchanged: derived.breadth.unchanged,
+    }
+  }, [derived?.breadth])
+
+  const marketStatus: MarketStatusData | null = useMemo(() => {
+    if (!derived?.marketStatus) return null
+    return {
+      status: derived.marketStatus.status as MarketStatusData['status'],
+      message: derived.marketStatus.message,
+      istTime: derived.marketStatus.istTime,
+      nextOpen: derived.marketStatus.nextOpen,
+    }
+  }, [derived?.marketStatus])
+
+  const sectors: SectorData[] = useMemo(() => {
+    if (!derived?.sectors?.length) return []
+    return derived.sectors.map(s => ({
+      id: s.id,
+      name: s.name,
+      indexSymbol: s.indexSymbol,
+      todayChange: s.todayChange,
+      topStockSymbol: s.topStockSymbol,
+      topStockChange: s.topStockChange,
+      isActive: s.isActive,
+    }))
+  }, [derived?.sectors])
+
+  // Loading states derived from WS data availability
+  const gainersLoading = !derived
+  const losersLoading = !derived
+  const marketStatusLoading = !derived
+  const breadthLoading = !derived
+  const sectorsLoading = !derived
+
+  // ─── One-time fetches ───────────────────────────────────────
+  const fetchIndices = useCallback(async () => {
+    try {
+      const res = await fetch('/api/indices')
+      if (res.ok) {
+        const json = await res.json()
+        if (json.data?.length > 0) setIndices(json.data)
+      }
+    } catch { /* silent */ }
+    finally { setIndicesLoading(false) }
+  }, [])
+
+  const fetchHolidays = useCallback(async () => {
+    try {
+      const res = await fetch('/api/market/holidays')
+      if (res.ok) {
+        const json = await res.json()
+        if (json.success && json.data?.length > 0) setHolidays(json.data)
+      }
+    } catch { /* silent */ }
+    finally { setHolidaysLoading(false) }
+  }, [])
+
+  // ─── Initial mount: fetch indices metadata & holidays once ───
+  useEffect(() => {
+    fetchIndices()
+    fetchHolidays()
+  }, [fetchIndices, fetchHolidays])
+
+  // ─── Refresh handler (manual only, no polling) ──────────────
+  const refreshAll = useCallback(() => {
+    setIsRefreshing(true)
+    setLastRefreshed(new Date())
+    // Brief spin animation, data comes via WebSocket automatically
+    setTimeout(() => setIsRefreshing(false), 500)
+  }, [])
+
+  // ─── Merge WebSocket index data with REST metadata ──────────
+  const mergedIndices = useMemo(() => {
+    if (Object.keys(wsIndices).length > 0) {
+      return indices.map(idx => {
+        const wsQuote = wsIndices[idx.symbol]
+        if (wsQuote) {
+          const previousClose = wsQuote.ohlc.close - wsQuote.net_change
+          const changePercent = previousClose > 0 ? (wsQuote.net_change / previousClose) * 100 : 0
+          return {
+            ...idx,
+            currentPrice: wsQuote.last_price,
+            change: wsQuote.net_change,
+            changePercent,
+            isRealData: true,
+            dataSource: 'upstox',
+          }
+        }
+        return idx
+      })
+    }
+    return indices
+  }, [indices, wsIndices])
+
+  // ─── Listen for index detail events from ticker ────────────
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail
+      if (detail?.symbol) navigateToIndex(detail.symbol)
+    }
+    window.addEventListener('openIndexDetail', handler)
+    return () => window.removeEventListener('openIndexDetail', handler)
+  }, [navigateToIndex])
+
+  // ─── Get sorted indices matching our target list (WS-enhanced) ──
+  const displayIndices = TARGET_INDICES.map(symbol =>
+    mergedIndices.find(idx => idx.symbol === symbol)
+  ).filter(Boolean) as IndexData[]
+
+  // ─── Index Card Component ──────────────────────────────────
+  function IndexCard({ index }: { index: IndexData }) {
+    const isPositive = index.changePercent >= 0
+
+    return (
+      <Card
+        onClick={() => navigateToIndex(index.symbol)}
+        className="bg-card border border-border rounded-xl shadow-sm hover:shadow-lg hover:border-[#00D09C]/40 transition-all duration-200 cursor-pointer group overflow-hidden"
+      >
+        <CardContent className="p-4">
+          {/* Index Name Row */}
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-semibold text-muted-foreground tracking-wider uppercase">
+                {index.name || index.symbol}
+              </span>
+            </div>
+            {isPositive ? (
+              <TrendingUp className="size-4 text-[#00B386] opacity-60 group-hover:opacity-100 transition-opacity" />
+            ) : (
+              <TrendingDown className="size-4 text-[#EB5B3C] opacity-60 group-hover:opacity-100 transition-opacity" />
+            )}
+          </div>
+
+          {/* Price */}
+          <div className="text-[28px] font-bold font-mono text-foreground leading-tight mb-1">
+            ₹{formatPrice(index.currentPrice)}
+          </div>
+
+          {/* Change Row */}
+          <div className={cn('flex items-center gap-1.5 text-xs font-semibold mb-3',
+            isPositive ? 'text-[#00B386]' : 'text-[#EB5B3C]'
+          )}>
+            {isPositive ? <ArrowUpRight className="size-3.5" /> : <ArrowDownRight className="size-3.5" />}
+            <span>{index.change >= 0 ? '+' : ''}{formatPrice(index.change)}</span>
+            <span className={cn('text-[10px] px-1.5 py-0.5 rounded font-bold',
+              isPositive ? 'bg-[#00B386]/10 text-[#00B386]' : 'bg-[#EB5B3C]/10 text-[#EB5B3C]'
+            )}>
+              {formatPercent(index.changePercent)}
+            </span>
+          </div>
+
+          {/* View Details Footer */}
+          <div className="flex items-center justify-end pt-2 border-t border-border">
+            <span className="text-[10px] font-semibold text-[#00D09C] flex items-center gap-1 group-hover:gap-2 transition-all">
+              View Details <ChevronRight className="size-3" />
+            </span>
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  // ─── Index Card Skeleton ──────────────────────────────────
+  function IndexCardSkeleton() {
+    return (
+      <Card className="bg-card border border-border rounded-xl shadow-sm overflow-hidden">
+        <CardContent className="p-4">
+          <div className="flex items-center justify-between mb-2">
+            <Skeleton className="h-3 w-24 bg-background" />
+            <Skeleton className="size-4 rounded bg-background" />
+          </div>
+          <Skeleton className="h-8 w-32 mb-1.5 bg-background" />
+          <Skeleton className="h-4 w-28 mb-3 bg-background" />
+          <div className="flex items-center justify-end pt-2 border-t border-border">
+            <Skeleton className="h-3 w-20 bg-background" />
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  return (
+    <div className="min-h-screen bg-background">
+
+      {/* ═══ MAIN CONTENT (No Tab Bar) ═════════════════════════════════════════ */}
+      <div className="px-4 sm:px-6 lg:px-8 py-5 space-y-5">
+
+        {/* ── Market Status Banner ────────────────────────────────────── */}
+        <div className="flex items-center justify-between">
+          <div className="flex-1">
+            {marketStatus ? (
+              <div className={cn(
+                'flex items-center justify-between px-4 py-2.5 rounded-xl border',
+                marketStatus.status === 'OPEN'
+                  ? 'bg-[#00B386]/5 border-[#00B386]/20'
+                  : marketStatus.status === 'PRE-OPEN'
+                    ? 'bg-amber-50 border-amber-200'
+                    : 'bg-card border-border'
+              )}>
+                <div className="flex items-center gap-2.5">
+                  <div className="relative flex items-center justify-center">
+                    <Circle
+                      className={cn('size-2.5 fill-current',
+                        marketStatus.status === 'OPEN' ? 'text-[#00B386]' :
+                        marketStatus.status === 'PRE-OPEN' ? 'text-amber-500' : 'text-muted-foreground'
+                      )}
+                    />
+                    {marketStatus.status === 'OPEN' && (
+                      <span className="absolute inset-0 rounded-full animate-ping bg-[#00B386]/40" />
+                    )}
+                  </div>
+                  <span className={cn('text-xs font-bold tracking-wider',
+                    marketStatus.status === 'OPEN' ? 'text-[#00B386]' :
+                    marketStatus.status === 'PRE-OPEN' ? 'text-amber-600' : 'text-muted-foreground'
+                  )}>
+                    {marketStatus.status === 'POST-CLOSE' ? 'POST-CLOSE' : marketStatus.status}
+                  </span>
+                  <span className="text-[11px] text-muted-foreground">·</span>
+                  <span className="text-[11px] text-muted-foreground">{marketStatus.message}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {marketStatus.nextOpen && (
+                    <span className="text-[10px] text-muted-foreground hidden sm:inline">
+                      Opens: {new Date(marketStatus.nextOpen).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  )}
+                  <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                    <Clock className="size-3" />
+                    <span className="font-mono">{marketStatus.istTime}</span>
+                    <span className="text-[9px] font-medium">IST</span>
+                  </div>
+                </div>
+              </div>
+            ) : marketStatusLoading ? (
+              <div className="flex items-center justify-between px-4 py-2.5 rounded-xl border border-border bg-card">
+                <div className="flex items-center gap-2.5">
+                  <Skeleton className="size-2.5 rounded-full bg-border" />
+                  <Skeleton className="h-3 w-16 bg-border" />
+                  <Skeleton className="h-3 w-24 bg-border" />
+                </div>
+                <Skeleton className="h-3 w-20 bg-border" />
+              </div>
+            ) : null}
+          </div>
+          {/* Manual Refresh */}
+          <button
+            onClick={refreshAll}
+            disabled={isRefreshing}
+            className="ml-3 size-8 rounded-lg border border-border bg-card flex items-center justify-center hover:bg-background transition-colors disabled:opacity-50 shadow-sm"
+            title="Refresh data"
+          >
+            <RefreshCw className={cn('size-3.5 text-muted-foreground', isRefreshing && 'animate-spin')} />
+          </button>
+        </div>
+
+        {/* ── 4 Index Cards ────────────────────────────────────────────── */}
+        <div>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-bold text-foreground flex items-center gap-2">
+              <CandlestickChart className="size-4 text-[#00D09C]" />
+              Index Overview
+            </h2>
+            <span className="text-[10px] text-muted-foreground">
+              Last refreshed: {lastRefreshed.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+            </span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+            {indicesLoading ? (
+              Array.from({ length: 4 }).map((_, i) => (
+                <IndexCardSkeleton key={i} />
+              ))
+            ) : displayIndices.length > 0 ? (
+              displayIndices.map((index, i) => (
+                <motion.div
+                  key={index.symbol}
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.3, delay: i * 0.05 }}
+                >
+                  <IndexCard index={index} />
+                </motion.div>
+              ))
+            ) : (
+              <div className="col-span-full">
+                <Card className="bg-card border border-border rounded-xl shadow-sm">
+                  <CardContent className="p-8 text-center">
+                    <BarChart3 className="size-8 text-muted-foreground mx-auto mb-2" />
+                    <p className="text-sm text-muted-foreground">Index data unavailable</p>
+                    <p className="text-xs text-muted-foreground mt-1">Please check your connection and try again</p>
+                  </CardContent>
+                </Card>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ── Market Breadth + Sectors Row ─────────────────────────────── */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {/* Market Breadth Card */}
+          <Card className="bg-card border border-border rounded-xl shadow-sm">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="size-6 rounded-lg bg-[#00D09C]/10 flex items-center justify-center">
+                  <Activity className="size-3 text-[#00D09C]" />
+                </div>
+                <h3 className="text-sm font-semibold text-foreground">Market Breadth</h3>
+              </div>
+              {breadthLoading ? (
+                <div className="space-y-2">
+                  <Skeleton className="h-3 w-full bg-background" />
+                  <div className="flex gap-4">
+                    <Skeleton className="h-4 w-16 bg-background" />
+                    <Skeleton className="h-4 w-16 bg-background" />
+                    <Skeleton className="h-4 w-16 bg-background" />
+                  </div>
+                </div>
+              ) : marketBreadth ? (
+                <>
+                  <BreadthBar breadth={marketBreadth} />
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-1.5">
+                      <ArrowUpRight className="size-3 text-[#00B386]" />
+                      <span className="text-xs font-bold text-[#00B386] font-mono">{marketBreadth.advances}</span>
+                      <span className="text-[10px] text-muted-foreground">Adv</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <Minus className="size-3 text-muted-foreground" />
+                      <span className="text-xs font-bold text-muted-foreground font-mono">{marketBreadth.unchanged}</span>
+                      <span className="text-[10px] text-muted-foreground">Unch</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <ArrowDownRight className="size-3 text-[#EB5B3C]" />
+                      <span className="text-xs font-bold text-[#EB5B3C] font-mono">{marketBreadth.declines}</span>
+                      <span className="text-[10px] text-muted-foreground">Dec</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between pt-2 border-t border-border">
+                    <div className="text-center">
+                      <p className="text-[9px] font-bold text-muted-foreground tracking-wider uppercase">52W Highs</p>
+                      <p className="text-xs font-bold font-mono text-[#00B386]">{marketBreadth.week52Highs ?? '-'}</p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-[9px] font-bold text-muted-foreground tracking-wider uppercase">52W Lows</p>
+                      <p className="text-xs font-bold font-mono text-[#EB5B3C]">{marketBreadth.week52Lows ?? '-'}</p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-[9px] font-bold text-muted-foreground tracking-wider uppercase">Total</p>
+                      <p className="text-xs font-bold font-mono text-foreground">{marketBreadth.advances + marketBreadth.declines + marketBreadth.unchanged}</p>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <p className="text-xs text-muted-foreground">Breadth data unavailable</p>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Sectors Performance Card */}
+          <Card className="bg-card border border-border rounded-xl shadow-sm">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="size-6 rounded-lg bg-[#00D09C]/10 flex items-center justify-center">
+                  <BarChart3 className="size-3 text-[#00D09C]" />
+                </div>
+                <h3 className="text-sm font-semibold text-foreground">Sector Performance</h3>
+              </div>
+              {sectorsLoading ? (
+                <div className="flex flex-wrap gap-2">
+                  {Array.from({ length: 6 }).map((_, i) => (
+                    <Skeleton key={i} className="h-7 w-20 rounded-full bg-background" />
+                  ))}
+                </div>
+              ) : sectors.length > 0 ? (
+                <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto">
+                  {sectors.map((sector) => {
+                    const isPositive = sector.todayChange >= 0
+                    return (
+                      <div
+                        key={sector.id}
+                        className={cn(
+                          'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors',
+                          isPositive
+                            ? 'bg-[#00B386]/5 border-[#00B386]/20 text-[#00B386]'
+                            : 'bg-[#EB5B3C]/5 border-[#EB5B3C]/20 text-[#EB5B3C]'
+                        )}
+                      >
+                        {isPositive ? <TrendingUp className="size-3" /> : <TrendingDown className="size-3" />}
+                        <span>{sector.name}</span>
+                        <span className="font-mono">
+                          {formatPercent(sector.todayChange)}
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">Sector data unavailable</p>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* ── Top Gainers & Losers Row ──────────────────────────────────── */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {/* Top Gainers */}
+          <Card className="bg-card border border-border rounded-xl shadow-sm">
+            <CardContent className="p-0">
+              <div className="flex items-center justify-between px-5 pt-4 pb-2">
+                <div className="flex items-center gap-2.5">
+                  <div className="size-7 rounded-lg bg-[#00B386]/10 flex items-center justify-center">
+                    <Flame className="size-3.5 text-[#00B386]" />
+                  </div>
+                  <h3 className="text-sm font-semibold text-foreground">Top Gainers</h3>
+                </div>
+                <span className="text-[11px] text-muted-foreground font-medium">{apiGainers.length} stocks</span>
+              </div>
+              {gainersLoading ? (
+                <div className="px-5 pb-4 space-y-2">
+                  {Array.from({ length: 3 }).map((_, i) => (
+                    <div key={i} className="flex items-center justify-between py-2">
+                      <Skeleton className="h-4 w-20 bg-background" />
+                      <Skeleton className="h-4 w-16 bg-background" />
+                    </div>
+                  ))}
+                </div>
+              ) : apiGainers.length > 0 ? (
+                <div className="px-2 pb-2 divide-y divide-border max-h-96 overflow-y-auto">
+                  {apiGainers.map((stock) => (
+                    <StockRow key={stock.id} stock={stock} onClick={() => navigateToStock(stock.symbol)} />
+                  ))}
+                </div>
+              ) : (
+                <div className="px-5 pb-4 text-center">
+                  <p className="text-xs text-muted-foreground">Gainers data unavailable</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Top Losers */}
+          <Card className="bg-card border border-border rounded-xl shadow-sm">
+            <CardContent className="p-0">
+              <div className="flex items-center justify-between px-5 pt-4 pb-2">
+                <div className="flex items-center gap-2.5">
+                  <div className="size-7 rounded-lg bg-[#EB5B3C]/10 flex items-center justify-center">
+                    <TrendingDown className="size-3.5 text-[#EB5B3C]" />
+                  </div>
+                  <h3 className="text-sm font-semibold text-foreground">Top Losers</h3>
+                </div>
+                <span className="text-[11px] text-muted-foreground font-medium">{apiLosers.length} stocks</span>
+              </div>
+              {losersLoading ? (
+                <div className="px-5 pb-4 space-y-2">
+                  {Array.from({ length: 3 }).map((_, i) => (
+                    <div key={i} className="flex items-center justify-between py-2">
+                      <Skeleton className="h-4 w-20 bg-background" />
+                      <Skeleton className="h-4 w-16 bg-background" />
+                    </div>
+                  ))}
+                </div>
+              ) : apiLosers.length > 0 ? (
+                <div className="px-2 pb-2 divide-y divide-border max-h-96 overflow-y-auto">
+                  {apiLosers.map((stock) => (
+                    <StockRow key={stock.id} stock={stock} onClick={() => navigateToStock(stock.symbol)} />
+                  ))}
+                </div>
+              ) : (
+                <div className="px-5 pb-4 text-center">
+                  <p className="text-xs text-muted-foreground">Losers data unavailable</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* ── Upcoming Holidays ─────────────────────────────────────────── */}
+        {!holidaysLoading && holidays.length > 0 && (
+          <Card className="bg-card border border-border rounded-xl shadow-sm">
+            <CardContent className="p-0">
+              <button
+                onClick={() => setHolidaysOpen(!holidaysOpen)}
+                className="flex items-center justify-between w-full px-5 py-3.5 text-left hover:bg-background/50 transition-colors rounded-t-xl"
+              >
+                <div className="flex items-center gap-2.5">
+                  <div className="size-7 rounded-lg bg-amber-50 flex items-center justify-center">
+                    <Calendar className="size-3.5 text-amber-600" />
+                  </div>
+                  <h3 className="text-sm font-semibold text-foreground">Upcoming Holidays</h3>
+                  <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 font-bold border-amber-200 text-amber-600 bg-amber-50">
+                    {holidays.length}
+                  </Badge>
+                </div>
+                {holidaysOpen ? (
+                  <ChevronUp className="size-4 text-muted-foreground" />
+                ) : (
+                  <ChevronDown className="size-4 text-muted-foreground" />
+                )}
+              </button>
+              <AnimatePresence>
+                {holidaysOpen && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.2, ease: 'easeInOut' }}
+                    className="overflow-hidden"
+                  >
+                    <div className="px-5 pb-3 divide-y divide-border">
+                      {holidays.slice(0, 5).map((holiday) => {
+                        const holidayDate = new Date(holiday.date)
+                        const dayName = holidayDate.toLocaleDateString('en-IN', { weekday: 'short' })
+                        const dateStr = holidayDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+                        return (
+                          <div key={holiday.id} className="flex items-center justify-between py-2.5">
+                            <div className="flex items-center gap-3">
+                              <div className="size-8 rounded-lg bg-background flex items-center justify-center shrink-0">
+                                <span className="text-[10px] font-bold text-muted-foreground">{dayName}</span>
+                              </div>
+                              <div>
+                                <p className="text-xs font-semibold text-foreground">{holiday.name}</p>
+                                <p className="text-[10px] text-muted-foreground">{dateStr}</p>
+                              </div>
+                            </div>
+                            {holiday.isMuhurat && (
+                              <Badge variant="outline" className="text-[8px] px-1.5 py-0 h-4 font-bold border-[#00D09C]/30 text-[#00D09C] bg-[#00D09C]/5">
+                                Muhurat
+                              </Badge>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </CardContent>
+          </Card>
+        )}
+
+      </div>
+    </div>
+  )
+}

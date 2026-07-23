@@ -1,0 +1,1543 @@
+'use client'
+
+import { useState, useEffect, useCallback, useMemo, useRef, memo } from 'react'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Input } from '@/components/ui/input'
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+} from '@/components/ui/sheet'
+import {
+  ArrowUpRight,
+  ArrowDownRight,
+  Loader2,
+  TrendingUp,
+  Clock,
+  Zap,
+  ChevronRight,
+  X,
+  Eye,
+  IndianRupee,
+  Layers,
+  BarChart3,
+  Calendar,
+  Hash,
+  Tag,
+  Activity,
+  Briefcase,
+  LineChart,
+} from 'lucide-react'
+import { useAuthStore } from '@/lib/auth-store'
+import { useAppStore } from '@/lib/store'
+import { toast } from 'sonner'
+import { formatINR, formatINRWhole, formatPrice, formatPnL, formatPercent } from '@/lib/format'
+import { useStockData } from '@/hooks/use-market-data'
+import { wsClient } from '@/lib/ws-client'
+import dynamic from 'next/dynamic'
+const StrikeOverviewDrawer = dynamic(
+  () => import('@/components/nexttrade/ui/strike-overview-drawer').then(m => ({ default: m.StrikeOverviewDrawer })),
+  { ssr: false }
+)
+
+// ─── Types ───────────────────────────────────────────────────────
+
+interface PositionData {
+  id: string
+  segment: string
+  productType: string
+  tradeDirection: string
+  symbol: string
+  optionType?: string | null
+  strikePrice?: number | null
+  expiryDate?: string | null
+  quantity: number
+  entryPrice: number
+  currentPrice: number
+  totalInvested: number
+  currentValue: number
+  unrealizedPnl: number
+  unrealizedPnlPercent: number
+  realizedPnl?: number | null
+  exitPrice?: number | null
+  exitReason?: string | null
+  closedAt?: string | null
+  marginUsed: number
+  lots: number
+  lotSize: number
+  isOpen: boolean
+  createdAt: string
+  stopLoss?: number | null
+  target?: number | null
+}
+
+// Helper to determine if a position is a Stock (EQUITY) or Index (FUTURES/OPTIONS)
+function isStockPosition(pos: PositionData): boolean {
+  return pos.segment === 'EQUITY'
+}
+
+function isIndexPosition(pos: PositionData): boolean {
+  return pos.segment === 'FUTURES' || pos.segment === 'OPTIONS'
+}
+
+function formatDuration(startIso: string, endIso?: string | null): string {
+  const start = new Date(startIso).getTime()
+  const end = endIso ? new Date(endIso).getTime() : Date.now()
+  const diffMs = end - start
+  const diffMin = Math.floor(diffMs / 60000)
+  if (diffMin < 1) return '< 1m'
+  if (diffMin < 60) return `${diffMin}m`
+  const diffHr = Math.floor(diffMin / 60)
+  const remMin = diffMin % 60
+  if (diffHr < 24) return `${diffHr}h ${remMin}m`
+  const diffDay = Math.floor(diffHr / 24)
+  const remHr = diffHr % 24
+  return `${diffDay}d ${remHr}h`
+}
+
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+// ─── Groww-Style Live Price Cell ────────────────────────────────
+
+const LivePriceCell = memo(function LivePriceCell({
+  price,
+  prevPrice,
+}: {
+  price: number
+  prevPrice: number | undefined
+}) {
+  const direction = prevPrice !== undefined && price !== prevPrice
+    ? (price > prevPrice ? 'up' : 'down')
+    : null
+
+  return (
+    <span className={`font-mono-data font-tabular text-[15px] font-semibold inline-block px-1.5 py-0.5 rounded ${
+      direction === 'up' ? 'animate-flash-green text-[#00B386]' : direction === 'down' ? 'animate-flash-red text-[#EB5B3C]' : 'text-foreground'
+    }`}>
+      {formatPrice(price)}
+    </span>
+  )
+})
+
+// ─── Groww-Style P&L Cell with BIG FILL ────────────────────────
+
+const PnLFillCell = memo(function PnLFillCell({
+  pnl,
+  pnlPercent,
+  prevPnl,
+}: {
+  pnl: number
+  pnlPercent: number
+  prevPnl: number | undefined
+}) {
+  const isPositive = pnl >= 0
+  const shouldFlash = prevPnl !== undefined && pnl !== prevPnl
+  const absPnl = Math.abs(pnl)
+
+  return (
+    <div className={`flex flex-col items-end px-3 py-2 rounded-xl ${
+      shouldFlash ? 'animate-pnl-flash' : ''
+    } ${
+      isPositive
+        ? 'bg-[#00B386]/12 border border-[#00B386]/20'
+        : 'bg-[#EB5B3C]/10 border border-[#EB5B3C]/18'
+    }`}>
+      <span className={`font-mono-data font-tabular text-[15px] font-bold ${
+        isPositive ? 'text-[#009e76]' : 'text-[#d44a2d]'
+      }`}>
+        {formatPnL(isPositive ? absPnl : -absPnl)}
+      </span>
+      <span className={`font-mono-data font-tabular text-[11px] font-semibold mt-0.5 ${
+        isPositive ? 'text-[#009e76]/80' : 'text-[#d44a2d]/80'
+      }`}>
+        {formatPercent(pnlPercent)}
+      </span>
+    </div>
+  )
+})
+
+// ─── Groww-Style Open Position Card ─────────────────────────────
+
+const OpenPositionCard = memo(function OpenPositionCard({
+  pos,
+  livePrice,
+  prevPrice,
+  prevPnl,
+  isLive,
+  onSquareOff,
+  isSquaringOff,
+  onViewDetails,
+  onViewStrikeChart,
+}: {
+  pos: PositionData
+  livePrice: number
+  prevPrice: number | undefined
+  prevPnl: number | undefined
+  isLive: boolean
+  onSquareOff: (id: string, symbol: string) => void
+  isSquaringOff: boolean
+  onViewDetails: (pos: PositionData) => void
+  onViewStrikeChart?: (pos: PositionData) => void
+}) {
+  const isLong = pos.tradeDirection === 'BUY'
+
+  // Calculate live P&L
+  const livePnl = isLong
+    ? (livePrice - pos.entryPrice) * pos.quantity
+    : (pos.entryPrice - livePrice) * pos.quantity
+  const livePnlPercent = pos.totalInvested > 0
+    ? (livePnl / pos.totalInvested) * 100
+    : 0
+
+  const isProfit = livePnl >= 0
+
+  return (
+    <div className="bg-card rounded-2xl border border-border overflow-hidden transition-shadow hover:shadow-md">
+      {/* Top section: Symbol + P&L fill */}
+      <div className="flex items-start justify-between p-4 pb-3">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1">
+            {pos.segment === 'OPTIONS' && onViewStrikeChart ? (
+              <button
+                className="font-bold text-[15px] text-foreground truncate hover:text-[#00D09C] transition-colors text-left"
+                onClick={() => onViewStrikeChart(pos)}
+              >
+                {pos.symbol}
+              </button>
+            ) : (
+              <span className="font-bold text-[15px] text-foreground truncate">{pos.symbol}</span>
+            )}
+            <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[9px] font-bold uppercase shrink-0 ${
+              isLong
+                ? 'bg-[#00B386]/10 text-[#00B386]'
+                : 'bg-[#EB5B3C]/10 text-[#EB5B3C]'
+            }`}>
+              {isLong ? <ArrowUpRight className="size-2.5" /> : <ArrowDownRight className="size-2.5" />}
+              {isLong ? 'BUY' : 'SELL'}
+            </span>
+            {isLive && (
+              <span className="flex items-center gap-0.5 text-[8px] font-bold text-[#00B386] bg-[#00B386]/8 px-1.5 py-0.5 rounded-full uppercase tracking-wider shrink-0">
+                <Zap className="size-2" />
+                LIVE
+              </span>
+            )}
+            {pos.stopLoss && pos.stopLoss > 0 && (
+              <span className="text-[8px] font-bold text-[#EB5B3C] bg-[#EB5B3C]/10 px-1.5 py-0.5 rounded-full shrink-0">SL</span>
+            )}
+            {pos.target && pos.target > 0 && (
+              <span className="text-[8px] font-bold text-[#00B386] bg-[#00B386]/10 px-1.5 py-0.5 rounded-full shrink-0">TGT</span>
+            )}
+          </div>
+          <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            {pos.segment === 'OPTIONS' && pos.strikePrice && (
+              <button
+                className="text-[#00D09C] font-semibold hover:underline"
+                onClick={() => onViewStrikeChart?.(pos)}
+              >
+                {pos.strikePrice} {pos.optionType}
+              </button>
+            )}
+            {pos.segment === 'FUTURES' && <span>FUT</span>}
+            <span>·</span>
+            <span>Qty: {pos.quantity}</span>
+            <span>·</span>
+            <span>{pos.segment}</span>
+          </div>
+        </div>
+
+        {/* BIG P&L fill */}
+        <div className="shrink-0 ml-3">
+          <PnLFillCell
+            pnl={Math.round(livePnl * 100) / 100}
+            pnlPercent={Math.round(livePnlPercent * 100) / 100}
+            prevPnl={prevPnl}
+          />
+        </div>
+      </div>
+
+      {/* Bottom section: Price info + View Details + Exit */}
+      <div className={`flex items-center justify-between px-4 py-2.5 border-t ${
+        isProfit ? 'bg-[#00B386]/[0.03] border-[#00B386]/10' : 'bg-[#EB5B3C]/[0.03] border-[#EB5B3C]/10'
+      }`}>
+        <div className="flex items-center gap-3 text-[12px]">
+          <div className="flex flex-col">
+            <span className="text-muted-foreground text-[10px] font-medium">Entry</span>
+            <span className="font-mono-data font-tabular text-foreground font-medium">{formatPrice(pos.entryPrice)}</span>
+          </div>
+          <ChevronRight className="size-3 text-muted-foreground" />
+          <div className="flex flex-col">
+            <span className="text-muted-foreground text-[10px] font-medium">LTP</span>
+            <LivePriceCell price={livePrice} prevPrice={prevPrice} />
+          </div>
+          {pos.stopLoss && pos.stopLoss > 0 && (
+            <>
+              <ChevronRight className="size-3 text-muted-foreground" />
+              <div className="flex flex-col">
+                <span className="text-[#EB5B3C] text-[10px] font-medium">SL</span>
+                <span className="font-mono-data font-tabular text-[#EB5B3C] font-medium">{formatPrice(pos.stopLoss)}</span>
+              </div>
+            </>
+          )}
+          {pos.target && pos.target > 0 && (
+            <>
+              <ChevronRight className="size-3 text-muted-foreground" />
+              <div className="flex flex-col">
+                <span className="text-[#00B386] text-[10px] font-medium">TGT</span>
+                <span className="font-mono-data font-tabular text-[#00B386] font-medium">{formatPrice(pos.target)}</span>
+              </div>
+            </>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2">
+          {/* View Details button */}
+          <Button
+            variant="outline"
+            size="sm"
+            className="rounded-lg px-3 py-1.5 text-[11px] font-semibold active:scale-95 transition-all border-[#00D09C]/30 text-[#00D09C] bg-transparent hover:bg-[#00D09C] hover:text-white hover:border-[#00D09C]"
+            onClick={() => onViewDetails(pos)}
+          >
+            <Eye className="size-3 mr-1" />
+            View Details
+          </Button>
+
+          {/* Exit button */}
+          <Button
+            variant="outline"
+            size="sm"
+            className={`rounded-lg px-3 py-1.5 text-[11px] font-semibold active:scale-95 transition-all shrink-0 ${
+              isSquaringOff
+                ? 'border-muted-foreground text-muted-foreground'
+                : 'border-[#EB5B3C]/30 text-[#EB5B3C] bg-transparent hover:bg-[#EB5B3C] hover:text-white hover:border-[#EB5B3C]'
+            }`}
+            disabled={isSquaringOff}
+            onClick={() => onSquareOff(pos.id, pos.symbol)}
+          >
+            {isSquaringOff ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <X className="size-3 mr-1" />
+            )}
+            {isSquaringOff ? '' : 'Exit'}
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+})
+
+// ─── Groww-Style Closed Position Card ──────────────────────────
+
+const ClosedPositionCard = memo(function ClosedPositionCard({
+  pos,
+  onViewDetails,
+}: {
+  pos: PositionData
+  onViewDetails: (pos: PositionData) => void
+}) {
+  const isLong = pos.tradeDirection === 'BUY'
+  const isPositive = (pos.realizedPnl ?? 0) >= 0
+  const realizedPnl = pos.realizedPnl ?? 0
+
+  return (
+    <div className="bg-card rounded-2xl border border-border overflow-hidden transition-shadow hover:shadow-sm">
+      <div className="flex items-start justify-between p-4 pb-3">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="font-bold text-[15px] text-foreground truncate">{pos.symbol}</span>
+            <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[9px] font-bold uppercase shrink-0 ${
+              isLong
+                ? 'bg-[#00B386]/10 text-[#00B386]'
+                : 'bg-[#EB5B3C]/10 text-[#EB5B3C]'
+            }`}>
+              {isLong ? <ArrowUpRight className="size-2.5" /> : <ArrowDownRight className="size-2.5" />}
+              {isLong ? 'BUY' : 'SELL'}
+            </span>
+            <Badge variant="secondary" className="text-[9px] px-1.5 py-0 bg-muted-foreground/10 text-muted-foreground font-semibold uppercase shrink-0">
+              Closed
+            </Badge>
+            {pos.exitReason && (
+              <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${
+                pos.exitReason === 'TARGET'
+                  ? 'bg-[#00B386]/10 text-[#00B386]'
+                  : 'bg-[#EB5B3C]/10 text-[#EB5B3C]'
+              }`}>
+                {pos.exitReason === 'TARGET' ? 'Target Hit' : 'SL Hit'}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            {pos.segment === 'OPTIONS' && pos.strikePrice && (
+              <span>{pos.strikePrice} {pos.optionType}</span>
+            )}
+            {pos.segment === 'FUTURES' && <span>FUT</span>}
+            <span>·</span>
+            <span>Qty: {pos.quantity}</span>
+          </div>
+        </div>
+
+        {/* Closed P&L fill */}
+        <div className={`flex flex-col items-end px-3 py-2 rounded-xl shrink-0 ml-3 ${
+          isPositive
+            ? 'bg-[#00B386]/12 border border-[#00B386]/20'
+            : 'bg-[#EB5B3C]/10 border border-[#EB5B3C]/18'
+        }`}>
+          <span className={`font-mono-data font-tabular text-[15px] font-bold ${
+            isPositive ? 'text-[#009e76]' : 'text-[#d44a2d]'
+          }`}>
+            {formatPnL(isPositive ? realizedPnl : -realizedPnl)}
+          </span>
+          <span className={`font-mono-data font-tabular text-[11px] font-semibold mt-0.5 ${
+            isPositive ? 'text-[#009e76]/80' : 'text-[#d44a2d]/80'
+          }`}>
+            Realized P&L
+          </span>
+        </div>
+      </div>
+
+      <div className={`flex items-center justify-between px-4 py-2.5 border-t ${
+        isPositive ? 'bg-[#00B386]/[0.03] border-[#00B386]/10' : 'bg-[#EB5B3C]/[0.03] border-[#EB5B3C]/10'
+      }`}>
+        <div className="flex items-center gap-3 text-[12px]">
+          <div className="flex flex-col">
+            <span className="text-muted-foreground text-[10px] font-medium">Entry</span>
+            <span className="font-mono-data font-tabular text-foreground font-medium">{formatPrice(pos.entryPrice)}</span>
+          </div>
+          <ChevronRight className="size-3 text-muted-foreground" />
+          <div className="flex flex-col">
+            <span className="text-muted-foreground text-[10px] font-medium">Exit</span>
+            <span className="font-mono-data font-tabular text-foreground font-medium">{pos.exitPrice ? formatPrice(pos.exitPrice) : '—'}</span>
+          </div>
+          <div className="flex items-center gap-1 text-[11px] text-muted-foreground ml-2">
+            <Clock className="size-3" />
+            {formatDuration(pos.createdAt, pos.closedAt)}
+          </div>
+        </div>
+
+        {/* View Details button */}
+        <Button
+          variant="outline"
+          size="sm"
+          className="rounded-lg px-3 py-1.5 text-[11px] font-semibold active:scale-95 transition-all border-[#00D09C]/30 text-[#00D09C] bg-transparent hover:bg-[#00D09C] hover:text-white hover:border-[#00D09C]"
+          onClick={() => onViewDetails(pos)}
+        >
+          <Eye className="size-3 mr-1" />
+          View Details
+        </Button>
+      </div>
+    </div>
+  )
+})
+
+// ─── Groww-Style Total P&L Banner (only P&L, no investment) ────
+
+const TotalPnLBanner = memo(function TotalPnLBanner({
+  totalPnl,
+  openCount,
+  isLive,
+}: {
+  totalPnl: number
+  openCount: number
+  isLive: boolean
+}) {
+  const isProfit = totalPnl >= 0
+
+  return (
+    <div className={`rounded-2xl p-5 border ${
+      isProfit
+        ? 'bg-gradient-to-br from-[#00B386]/10 via-[#00B386]/5 to-transparent border-[#00B386]/20'
+        : 'bg-gradient-to-br from-[#EB5B3C]/10 via-[#EB5B3C]/5 to-transparent border-[#EB5B3C]/20'
+    }`}>
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-[12px] font-semibold text-muted-foreground uppercase tracking-wider">Total P&L</span>
+            {isLive && (
+              <span className="flex items-center gap-1 text-[9px] font-bold text-[#00B386] bg-[#00B386]/10 px-1.5 py-0.5 rounded-full uppercase tracking-wider">
+                <span className="size-1.5 rounded-full bg-[#00B386] animate-pulse" />
+                LIVE
+              </span>
+            )}
+          </div>
+          <div className="flex items-baseline gap-2">
+            <span className={`font-mono-data font-tabular text-[28px] font-bold tracking-tight ${
+              isProfit ? 'text-[#009e76]' : 'text-[#d44a2d]'
+            }`}>
+              {formatPnL(isProfit ? totalPnl : -totalPnl)}
+            </span>
+          </div>
+        </div>
+        <div className="text-right">
+          <div className="text-[11px] text-muted-foreground mt-1">
+            {openCount} {openCount === 1 ? 'position' : 'positions'} open
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+})
+
+// ─── Detail Sheet Row ───────────────────────────────────────────
+
+function DetailRow({ icon: Icon, label, value, valueClass }: {
+  icon: React.ElementType
+  label: string
+  value: string
+  valueClass?: string
+}) {
+  return (
+    <div className="flex items-center justify-between py-3 border-b border-muted last:border-b-0">
+      <div className="flex items-center gap-2.5">
+        <div className="size-7 rounded-lg bg-background flex items-center justify-center">
+          <Icon className="size-3.5 text-muted-foreground" />
+        </div>
+        <span className="text-[13px] text-muted-foreground font-medium">{label}</span>
+      </div>
+      <span className={`font-mono-data font-tabular text-[13px] font-semibold ${valueClass || 'text-foreground'}`}>
+        {value}
+      </span>
+    </div>
+  )
+}
+
+// ─── SL / Target Editor ────────────────────────────────────────
+
+function SLEditor({ position, onUpdated }: { position: PositionData; onUpdated?: (pos: Partial<PositionData>) => void }) {
+  const token = useAuthStore(s => s.token)
+  const [sl, setSl] = useState(position.stopLoss ? String(position.stopLoss) : '')
+  const [tgt, setTgt] = useState(position.target ? String(position.target) : '')
+  const [saving, setSaving] = useState(false)
+
+  const handleSave = async () => {
+    if (!token || (!sl && !tgt)) return
+    setSaving(true)
+    try {
+      const body: Record<string, unknown> = { positionId: position.id, stopLoss: null, target: null }
+      if (sl) body.stopLoss = parseFloat(sl)
+      if (tgt) body.target = parseFloat(tgt)
+      const res = await fetch('/api/trade/sl-set', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const data = await res.json()
+      if (res.ok && data.success) {
+        toast.success(`SL/Target updated for ${position.symbol}`)
+        onUpdated?.({
+          stopLoss: sl ? parseFloat(sl) : null,
+          target: tgt ? parseFloat(tgt) : null,
+        })
+      } else {
+        toast.error(data.error || 'Failed to update SL/Target')
+      }
+    } catch {
+      toast.error('Network error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleRemove = async () => {
+    if (!token) return
+    setSaving(true)
+    try {
+      const res = await fetch('/api/trade/sl-set', {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ positionId: position.id }),
+      })
+      if (res.ok) {
+        setSl('')
+        setTgt('')
+        toast.success('SL/Target removed')
+        onUpdated?.({ stopLoss: null, target: null })
+      }
+    } catch {
+      toast.error('Failed to remove')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const hasSL = position.stopLoss && position.stopLoss > 0
+  const hasTarget = position.target && position.target > 0
+  const entry = position.entryPrice
+  const isBuy = position.tradeDirection === 'BUY'
+
+  return (
+    <div className="mt-3 pt-3 border-t border-border space-y-2.5">
+      <div className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Stop Loss / Target</div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <div className="space-y-1">
+          <label className="text-[10px] font-bold text-[#EB5B3C] uppercase tracking-wider">Stop Loss</label>
+          <Input
+            type="number"
+            value={sl}
+            onChange={e => setSl(e.target.value)}
+            className="h-9 font-mono text-xs border-border bg-card focus:ring-[#EB5B3C]/20 focus:border-[#EB5B3C]"
+            placeholder={isBuy ? `Below ${entry}` : `Above ${entry}`}
+          />
+        </div>
+        <div className="space-y-1">
+          <label className="text-[10px] font-bold text-[#00B386] uppercase tracking-wider">Target</label>
+          <Input
+            type="number"
+            value={tgt}
+            onChange={e => setTgt(e.target.value)}
+            className="h-9 font-mono text-xs border-border bg-card focus:ring-[#00B386]/20 focus:border-[#00B386]"
+            placeholder={isBuy ? `Above ${entry}` : `Below ${entry}`}
+          />
+        </div>
+      </div>
+
+      <div className="flex gap-2">
+        <button
+          onClick={handleSave}
+          disabled={saving || (!sl && !tgt)}
+          className="flex-1 h-9 rounded-lg text-[11px] font-bold bg-[#00D09C] hover:bg-[#00b386] text-white disabled:opacity-40 disabled:cursor-not-allowed transition-all active:scale-[0.98]"
+        >
+          {saving ? 'Saving...' : 'Update'}
+        </button>
+        {(hasSL || hasTarget) && (
+          <button
+            onClick={handleRemove}
+            disabled={saving}
+            className="h-9 px-3 rounded-lg text-[11px] font-bold bg-background hover:bg-muted text-muted-foreground disabled:opacity-40 transition-all"
+          >
+            Remove
+          </button>
+        )}
+      </div>
+
+      {(hasSL || hasTarget) && (
+        <div className="flex gap-3 text-[10px] text-muted-foreground">
+          {hasSL && <span>SL: <b className="text-[#EB5B3C]">₹{position.stopLoss}</b></span>}
+          {hasTarget && <span>Target: <b className="text-[#00B386]">₹{position.target}</b></span>}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Position Detail Sheet ──────────────────────────────────────
+
+function PositionDetailSheet({
+  position,
+  livePrice,
+  open,
+  onOpenChange,
+  onSquareOff,
+  isSquaringOff,
+}: {
+  position: PositionData | null
+  livePrice: number | undefined
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  onSquareOff: (id: string, symbol: string) => void
+  isSquaringOff: boolean
+}) {
+  if (!position) return null
+
+  const isLong = position.tradeDirection === 'BUY'
+  const isProfit = position.isOpen !== false
+    ? isLong
+      ? (livePrice ?? position.currentPrice) > position.entryPrice
+      : position.entryPrice > (livePrice ?? position.currentPrice)
+    : (position.realizedPnl ?? 0) >= 0
+
+  const currentPrice = livePrice ?? position.currentPrice
+  const livePnl = isLong
+    ? (currentPrice - position.entryPrice) * position.quantity
+    : (position.entryPrice - currentPrice) * position.quantity
+  const livePnlPercent = position.totalInvested > 0
+    ? (livePnl / position.totalInvested) * 100
+    : 0
+
+  const isPositionOpen = position.isOpen !== false
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent side="bottom" className="rounded-t-3xl max-h-[85vh] overflow-y-auto">
+        <SheetHeader className="pb-2">
+          <div className="flex items-center gap-2">
+            <SheetTitle className="text-[18px] font-bold text-foreground">
+              {position.symbol}
+            </SheetTitle>
+            <span className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase ${
+              isLong
+                ? 'bg-[#00B386]/10 text-[#00B386]'
+                : 'bg-[#EB5B3C]/10 text-[#EB5B3C]'
+            }`}>
+              {isLong ? <ArrowUpRight className="size-3" /> : <ArrowDownRight className="size-3" />}
+              {isLong ? 'BUY' : 'SELL'}
+            </span>
+            {!isPositionOpen && (
+              <Badge variant="secondary" className="text-[9px] px-2 py-0 bg-muted-foreground/10 text-muted-foreground font-semibold uppercase">
+                Closed
+              </Badge>
+            )}
+          </div>
+          <SheetDescription className="sr-only">
+            Trade details for {position.symbol}
+          </SheetDescription>
+        </SheetHeader>
+
+        {/* P&L Hero */}
+        <div className={`rounded-2xl p-4 mb-4 border ${
+          isProfit
+            ? 'bg-gradient-to-br from-[#00B386]/10 via-[#00B386]/5 to-transparent border-[#00B386]/20'
+            : 'bg-gradient-to-br from-[#EB5B3C]/10 via-[#EB5B3C]/5 to-transparent border-[#EB5B3C]/20'
+        }`}>
+          <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">
+            {isPositionOpen ? 'Unrealized P&L' : 'Realized P&L'}
+          </div>
+          <div className="flex items-baseline gap-2">
+            <span className={`font-mono-data font-tabular text-[26px] font-bold ${
+              isProfit ? 'text-[#009e76]' : 'text-[#d44a2d]'
+            }`}>
+              {isPositionOpen
+                ? formatPnL(livePnl)
+                : formatPnL(position.realizedPnl ?? 0)
+              }
+            </span>
+            {isPositionOpen && (
+              <span className={`font-mono-data font-tabular text-[13px] font-semibold ${
+                isProfit ? 'text-[#009e76]/70' : 'text-[#d44a2d]/70'
+              }`}>
+                {formatPercent(livePnlPercent)}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* All Trade Details */}
+        <div className="px-1">
+          <DetailRow icon={Tag} label="Symbol" value={position.symbol} />
+          <DetailRow icon={Activity} label="Trade Type" value={isLong ? 'BUY (Long)' : 'SELL (Short)'} valueClass={isLong ? 'text-[#00B386]' : 'text-[#EB5B3C]'} />
+          <DetailRow icon={Layers} label="Segment" value={position.segment} />
+
+          {position.segment === 'OPTIONS' && position.strikePrice && (
+            <DetailRow icon={Hash} label="Strike / Option" value={`${position.strikePrice} ${position.optionType || ''}`} />
+          )}
+
+          {position.segment === 'FUTURES' && (
+            <DetailRow icon={Layers} label="Lot Size" value={`${position.lotSize} × ${position.lots} lots`} />
+          )}
+
+          {position.expiryDate && (
+            <DetailRow icon={Calendar} label="Expiry" value={formatDate(position.expiryDate)} />
+          )}
+
+          <DetailRow icon={Hash} label="Quantity" value={String(position.quantity)} />
+          <DetailRow icon={IndianRupee} label="Entry Price" value={formatINR(position.entryPrice)} />
+
+          {isPositionOpen ? (
+            <DetailRow icon={BarChart3} label="Current LTP" value={formatINR(currentPrice)} />
+          ) : (
+            <DetailRow icon={BarChart3} label="Exit Price" value={position.exitPrice ? formatINR(position.exitPrice) : '—'} />
+          )}
+
+          <DetailRow icon={IndianRupee} label="Total Invested" value={formatINR(position.totalInvested)} />
+          <DetailRow icon={IndianRupee} label="Current Value" value={formatINR(currentPrice * position.quantity)} />
+          <DetailRow icon={IndianRupee} label="Margin Used" value={formatINR(position.marginUsed)} />
+          <DetailRow icon={Calendar} label="Opened At" value={formatDate(position.createdAt)} />
+
+          {!isPositionOpen && position.closedAt && (
+            <DetailRow icon={Clock} label="Closed At" value={formatDate(position.closedAt)} />
+          )}
+
+          {!isPositionOpen && (
+            <DetailRow icon={Clock} label="Duration" value={formatDuration(position.createdAt, position.closedAt)} />
+          )}
+
+          {isPositionOpen && (
+            <DetailRow icon={Clock} label="Holding Duration" value={formatDuration(position.createdAt)} />
+          )}
+        </div>
+
+        {/* SL / Target Edit */}
+        {isPositionOpen && (
+          <SLEditor
+            position={position}
+            onUpdated={(updates) => {
+              setDetailPosition(prev => prev ? { ...prev, ...updates } : null)
+              // Also update the main positions list so SL/Target badges update immediately
+              setPositions(prev => prev.map(p =>
+                p.id === position.id ? { ...p, ...updates } : p
+              ))
+            }}
+          />
+        )}
+
+        {/* Square Off button for open positions */}
+        {isPositionOpen && (
+          <div className="mt-4 pt-4 border-t border-border">
+            <Button
+              className="w-full rounded-xl py-3 text-[14px] font-semibold bg-[#EB5B3C] hover:bg-[#d44a2d] text-white active:scale-[0.98] transition-all"
+              disabled={isSquaringOff}
+              onClick={() => {
+                onSquareOff(position.id, position.symbol)
+                onOpenChange(false)
+              }}
+            >
+              {isSquaringOff ? (
+                <Loader2 className="size-4 animate-spin mr-2" />
+              ) : (
+                <X className="size-4 mr-2" />
+              )}
+              {isSquaringOff ? 'Squaring Off...' : `Square Off ${position.symbol}`}
+            </Button>
+          </div>
+        )}
+      </SheetContent>
+    </Sheet>
+  )
+}
+
+// ─── Segment Sub-Tab ────────────────────────────────────────────
+
+type SegmentTab = 'stocks' | 'index'
+
+// ─── Main Component ─────────────────────────────────────────────
+
+export function PositionsPage() {
+  const { token } = useAuthStore()
+  const tradeSignal = useAppStore(s => s.tradeSignal)
+  const { setCurrentPage, positionsTab, setPositionsTab } = useAppStore()
+  const [positions, setPositions] = useState<PositionData[]>([])
+  const [loading, setLoading] = useState(true)
+  const [squaringOff, setSquaringOff] = useState<string | null>(null)
+  const [activeTab, setActiveTab] = useState<'open' | 'closed'>('open')
+  const segmentTab: SegmentTab = positionsTab
+  const [detailPosition, setDetailPosition] = useState<PositionData | null>(null)
+  const [detailOpen, setDetailOpen] = useState(false)
+
+  // ─── Strike Overview (for OPTIONS positions) ──────────────────
+  const [strikeOverview, setStrikeOverview] = useState<{
+    underlying: string
+    strike: number
+    optionType: 'CE' | 'PE'
+    instrumentKey: string
+    ltp: number
+    greeks: { iv: number; delta: number; theta: number; vega: number; gamma: number; pop: number } | null
+    marketData: { volume: number; oi: number; prev_oi: number; close_price: number; bid_price: number; ask_price: number; bid_qty: number; ask_qty: number } | null
+    spot: number
+  } | null>(null)
+  // Cache OC data (strike → { instrumentKey, greeks, marketData, spot })
+  const ocDataCacheRef = useRef<Map<string, {
+    instrumentKey: string
+    greeks: any
+    marketData: any
+    spot: number
+  }>>(new Map())
+
+  // ─── Real-Time Market Data ──────────────────────────────────
+  const { stocks: wsStockQuotes, status: wsStatus, marketClosed } = useStockData()
+
+  // Market status from poller
+  const marketOpen = !marketClosed
+
+  // ─── Live prices - separate refs for stable rendering ───────
+  const livePricesRef = useRef<Record<string, number>>({})
+  const prevPricesRef = useRef<Record<string, number>>({})
+  const prevPnlRef = useRef<Record<string, number>>({})
+  const [livePrices, setLivePrices] = useState<Record<string, number>>({})
+  const [prevPnlMap, setPrevPnlMap] = useState<Record<string, number>>({})
+
+  // Keep positions in a ref so OC handler always sees latest data
+  const positionsRef = useRef<PositionData[]>([])
+  positionsRef.current = positions
+
+  // Track OC WS cleanup functions by combo key ("NIFTY::2026-07-07")
+  const ocCleanupRef = useRef<Map<string, (() => void)[]>>(new Map())
+
+  // ─── Update EQUITY live prices from WebSocket stock quotes ──────
+  // Only EQUITY segment uses wsStockQuotes. OPTIONS use OC SSE (below),
+  // FUTURES use the server SSE stream.
+  useEffect(() => {
+    if (!marketOpen) return
+    if (wsStatus !== 'connected') return
+
+    const priceUpdates: Record<string, number> = {}
+    const pnlUpdates: Record<string, number> = {}
+    let hasChanges = false
+
+    for (const pos of positions) {
+      if (!pos.isOpen && pos.isOpen !== undefined) continue
+      if (pos.segment !== 'EQUITY') continue
+
+      const quote = wsStockQuotes[pos.symbol]
+      if (quote && quote.last_price > 0) {
+        const newPrice = quote.last_price
+        const currentLive = livePricesRef.current[pos.id]
+        if (currentLive !== newPrice) {
+          if (currentLive !== undefined) {
+            prevPricesRef.current[pos.id] = currentLive
+          }
+          if (currentLive !== undefined && currentLive > 0) {
+            const prevPnl = pos.tradeDirection === 'BUY'
+              ? (currentLive - pos.entryPrice) * pos.quantity
+              : (pos.entryPrice - currentLive) * pos.quantity
+            pnlUpdates[pos.id] = Math.round(prevPnl * 100) / 100
+          }
+          priceUpdates[pos.id] = newPrice
+          hasChanges = true
+        }
+      }
+    }
+
+    if (hasChanges) {
+      livePricesRef.current = { ...livePricesRef.current, ...priceUpdates }
+      setLivePrices(prev => ({ ...prev, ...priceUpdates }))
+      if (Object.keys(pnlUpdates).length > 0) {
+        prevPnlRef.current = { ...prevPnlRef.current, ...pnlUpdates }
+        setPrevPnlMap(prev => ({ ...prev, ...pnlUpdates }))
+      }
+    }
+  }, [wsStockQuotes, wsStatus, positions, marketOpen])
+
+  // ─── Fetch Positions ──────────────────────────────────────
+  const fetchPositions = useCallback(async () => {
+    if (!token) { setLoading(false); return }
+    try {
+      const res = await fetch('/api/trade/positions', {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (res.ok) {
+        const json = await res.json()
+        const newPos = json.data || []
+        setPositions(newPos)
+        // Initialize live prices keyed by pos.id (NOT pos.symbol)
+        // This ensures different strikes of same underlying get separate prices
+        const initialPrices: Record<string, number> = {}
+        for (const pos of newPos) {
+          if (pos.isOpen !== false) {
+            // For equity, prefer SSE/wsStockQuotes (handled in separate useEffect)
+            // For options/futures, use the server-provided currentPrice as initial value
+            if (pos.segment !== 'EQUITY') {
+              initialPrices[pos.id] = pos.currentPrice
+            }
+          }
+        }
+        if (Object.keys(initialPrices).length > 0) {
+          livePricesRef.current = { ...livePricesRef.current, ...initialPrices }
+          setLivePrices(prev => ({ ...prev, ...initialPrices }))
+        }
+      } else {
+        setPositions([])
+      }
+    } catch {
+      setPositions([])
+    } finally {
+      setLoading(false)
+    }
+  }, [token, wsStatus, tradeSignal])
+
+  useEffect(() => {
+    fetchPositions()
+    // Initial fetch + refresh on trade signal
+    return () => {}
+  }, [fetchPositions])
+
+  // ─── WS Position Stream (EQUITY prices + exit events) ──────
+  // Server pushes EQUITY live prices + exit events via WebSocket.
+  // OPTIONS prices come from OC WS (separate effect below).
+  useEffect(() => {
+    if (!token) return
+
+    // Subscribe to positions channel
+    wsClient.subscribe('positions')
+
+    // Listen for position updates
+    const unsubPositions = wsClient.on('positions', (data) => {
+      if (!data) return
+
+      const priceUpdates: Record<string, number> = {}
+      const pnlUpdates: Record<string, number> = {}
+      const exitEvents: Record<string, { reason: string; exitPrice: number; pnl: number; timestamp: number }> = {}
+
+      for (const update of data) {
+        // OPTIONS: price comes from OC WS — skip server price, only handle exits
+        if (update.segment === 'OPTIONS') {
+          if (update.exitEvent) {
+            exitEvents[update.positionId] = update.exitEvent
+          }
+          continue
+        }
+
+        // EQUITY / FUTURES: use server price
+        const prevLive = livePricesRef.current[update.positionId]
+        if (prevLive !== undefined && prevLive !== update.currentPrice) {
+          prevPricesRef.current[update.positionId] = prevLive
+        }
+
+        priceUpdates[update.positionId] = update.currentPrice
+        pnlUpdates[update.positionId] = update.unrealizedPnl
+
+        if (update.exitEvent) {
+          exitEvents[update.positionId] = update.exitEvent
+        }
+      }
+
+      if (Object.keys(priceUpdates).length > 0) {
+        livePricesRef.current = { ...livePricesRef.current, ...priceUpdates }
+        setLivePrices(prev => ({ ...prev, ...priceUpdates }))
+        setPrevPnlMap(prev => ({ ...prev, ...pnlUpdates }))
+        setPositions(prev => prev.map(pos => {
+          if (priceUpdates[pos.id] !== undefined) {
+            return {
+              ...pos,
+              currentPrice: priceUpdates[pos.id],
+              unrealizedPnl: pnlUpdates[pos.id] ?? pos.unrealizedPnl,
+            }
+          }
+          return pos
+        }))
+      }
+
+      // Handle exit events — show toast and refetch
+      for (const [posId, evt] of Object.entries(exitEvents)) {
+        const reasonLabel = evt.reason === 'STOP_LOSS' ? 'Stop Loss' : 'Target'
+        toast.success(`${reasonLabel} hit! Auto-exited @ ₹${evt.exitPrice}`, {
+          description: `P&L: ${formatPnL(evt.pnl)}`,
+          duration: 5000,
+        })
+        setTimeout(() => fetchPositions(), 500)
+      }
+    })
+
+    // Listen for exit events
+    const unsubExit = wsClient.on('exit', (evt) => {
+      if (!evt) return
+      const reasonLabel = evt.reason === 'STOP_LOSS' ? 'Stop Loss' : 'Target'
+      toast.success(`${reasonLabel} hit! ${evt.symbol} @ ₹${evt.exitPrice}`, {
+        description: `P&L: ${formatPnL(evt.pnl)}`,
+        duration: 5000,
+      })
+      setTimeout(() => fetchPositions(), 500)
+    })
+
+    return () => {
+      unsubPositions()
+      unsubExit()
+      wsClient.unsubscribe('positions')
+    }
+  }, [token, fetchPositions])
+
+  // ─── OPTIONS: Subscribe to Option Chain WS for real-time strike LTP ──
+
+  const ocComboStr = useMemo(() => {
+    const keys = new Set<string>()
+    for (const pos of positions) {
+      if (pos.isOpen && pos.segment === 'OPTIONS' && pos.strikePrice && pos.expiryDate) {
+        const expiry = new Date(pos.expiryDate).toISOString().split('T')[0]
+        keys.add(`${pos.symbol.toUpperCase()}::${expiry}`)
+      }
+    }
+    return [...keys].sort().join(',')
+  }, [positions])
+
+  useEffect(() => {
+    if (!marketOpen) {
+      for (const [key, cleanups] of ocCleanupRef.current) {
+        cleanups.forEach(fn => fn())
+      }
+      ocCleanupRef.current.clear()
+      return
+    }
+
+    const neededKeys = new Set(ocComboStr.split(',').filter(Boolean))
+
+    // Cleanup OC subs no longer needed
+    for (const [key, cleanups] of ocCleanupRef.current) {
+      if (!neededKeys.has(key)) {
+        cleanups.forEach(fn => fn())
+        ocCleanupRef.current.delete(key)
+      }
+    }
+
+    // Create OC subscriptions for new combos
+    for (const key of neededKeys) {
+      if (ocCleanupRef.current.has(key)) continue
+      const [underlying, expiry] = key.split('::')
+
+      wsClient.subscribe('options', { underlying, expiry })
+
+      let rafId: number | null = null
+      const pendingPrices: Record<string, number> = {}
+      const pendingPnls: Record<string, number> = {}
+
+      const flushUpdates = () => {
+        rafId = null
+        const prices = { ...pendingPrices }
+        const pnls = { ...pendingPnls }
+        for (const k of Object.keys(pendingPrices)) delete pendingPrices[k]
+        for (const k of Object.keys(pendingPnls)) delete pendingPnls[k]
+
+        if (Object.keys(prices).length > 0) {
+          livePricesRef.current = { ...livePricesRef.current, ...prices }
+          setLivePrices(prev => ({ ...prev, ...prices }))
+        }
+        if (Object.keys(pnls).length > 0) {
+          prevPnlRef.current = { ...prevPnlRef.current, ...pnls }
+          setPrevPnlMap(prev => ({ ...prev, ...pnls }))
+        }
+      }
+
+      const unsub = wsClient.on('options:update', (msg) => {
+        try {
+          if (!msg?.strikes) return
+
+          const strikes: any[] = msg.strikes
+          let hasChanges = false
+
+          const spot = msg.spot || 0
+          for (const s of strikes) {
+            const ceKey = `${underlying}::${expiry}::${s.strike_price}::CE`
+            const peKey = `${underlying}::${expiry}::${s.strike_price}::PE`
+            ocDataCacheRef.current.set(ceKey, {
+              instrumentKey: s.call_options?.instrument_key || '',
+              greeks: s.call_options?.option_greeks || null,
+              marketData: s.call_options?.market_data || null,
+              spot,
+            })
+            ocDataCacheRef.current.set(peKey, {
+              instrumentKey: s.put_options?.instrument_key || '',
+              greeks: s.put_options?.option_greeks || null,
+              marketData: s.put_options?.market_data || null,
+              spot,
+            })
+          }
+
+          const currentPositions = positionsRef.current
+          for (const pos of currentPositions) {
+            if (!pos.isOpen || pos.segment !== 'OPTIONS' || !pos.strikePrice) continue
+
+            const posExpiry = pos.expiryDate ? new Date(pos.expiryDate).toISOString().split('T')[0] : null
+            if (pos.symbol.toUpperCase() !== underlying || posExpiry !== expiry) continue
+
+            const strike = strikes.find((s: any) => s.strike_price === pos.strikePrice)
+            if (!strike) continue
+
+            const optData = pos.optionType === 'CE'
+              ? strike.call_options?.market_data
+              : strike.put_options?.market_data
+            if (!optData?.ltp || optData.ltp <= 0) continue
+
+            const newPrice = optData.ltp
+            const currentLive = livePricesRef.current[pos.id]
+            if (currentLive !== newPrice) {
+              if (currentLive !== undefined) {
+                prevPricesRef.current[pos.id] = currentLive
+              }
+              if (currentLive !== undefined && currentLive > 0) {
+                const prevPnl = pos.tradeDirection === 'BUY'
+                  ? (currentLive - pos.entryPrice) * pos.quantity
+                  : (pos.entryPrice - currentLive) * pos.quantity
+                pendingPnls[pos.id] = Math.round(prevPnl * 100) / 100
+              }
+              pendingPrices[pos.id] = newPrice
+              hasChanges = true
+            }
+          }
+
+          if (hasChanges && !rafId) {
+            rafId = requestAnimationFrame(flushUpdates)
+          }
+        } catch { /* ignore parse errors */ }
+      })
+
+      ocCleanupRef.current.set(key, [unsub])
+    }
+
+    return () => {
+      for (const [key, cleanups] of ocCleanupRef.current) {
+        cleanups.forEach(fn => fn())
+      }
+      ocCleanupRef.current.clear()
+    }
+  }, [ocComboStr, marketOpen])
+
+  // ─── Square Off ───────────────────────────────────────────
+  const handleSquareOff = useCallback(async (positionId: string, symbol: string) => {
+    if (!token) return
+    setSquaringOff(positionId)
+    try {
+      const res = await fetch('/api/trade/square-off', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ positionId }),
+      })
+      const data = await res.json()
+      if (res.ok && data.success) {
+        const pnlStr = data.closedPosition
+          ? `P&L: ${formatPnL(data.closedPosition.realizedPnl)}`
+          : ''
+        toast.success(`✅ ${symbol} squared off successfully!`, {
+          description: pnlStr,
+        })
+        setPositions(prev => prev.filter(p => p.id !== positionId))
+        fetchPositions()
+      } else {
+        toast.error(data.error || 'Failed to square off position')
+      }
+    } catch {
+      toast.error('Network error')
+    } finally {
+      setSquaringOff(null)
+    }
+  }, [token, fetchPositions])
+
+  // ─── View Details handler ─────────────────────────────────
+  const handleViewDetails = useCallback((pos: PositionData) => {
+    setDetailPosition(pos)
+    setDetailOpen(true)
+  }, [])
+
+  // ─── Open Strike Overview from OPTIONS position ──────────────
+  const handleOpenStrikeOverview = useCallback((pos: PositionData) => {
+    if (pos.segment !== 'OPTIONS' || !pos.strikePrice || !pos.expiryDate || !pos.optionType) return
+    const expiry = new Date(pos.expiryDate).toISOString().split('T')[0]
+    const cacheKey = `${pos.symbol.toUpperCase()}::${expiry}::${pos.strikePrice}::${pos.optionType}`
+    const cached = ocDataCacheRef.current.get(cacheKey)
+    if (cached && cached.instrumentKey) {
+      setStrikeOverview({
+        underlying: pos.symbol.toUpperCase(),
+        strike: pos.strikePrice,
+        optionType: pos.optionType as 'CE' | 'PE',
+        instrumentKey: cached.instrumentKey,
+        ltp: cached.marketData?.ltp || livePrices[pos.id] || pos.currentPrice,
+        greeks: cached.greeks,
+        marketData: cached.marketData,
+        spot: cached.spot,
+      })
+    }
+  }, [livePrices])
+
+  // ─── Split positions by open/closed and segment ───────────
+  const openStockPositions = useMemo(() =>
+    positions.filter(p => p.isOpen !== false && isStockPosition(p)),
+    [positions]
+  )
+
+  const openIndexPositions = useMemo(() =>
+    positions.filter(p => p.isOpen !== false && isIndexPosition(p)),
+    [positions]
+  )
+
+  // Closed positions: Only show trades from the last 24 hours (today)
+  const closedStockPositions = useMemo(() => {
+    const now = Date.now()
+    const twentyFourHoursAgo = now - 24 * 60 * 60 * 1000
+    return positions.filter(p => {
+      if (p.isOpen !== false) return false
+      if (!isStockPosition(p)) return false
+      // Use closedAt (from API), fallback to createdAt
+      const closedTime = p.closedAt ? new Date(p.closedAt).getTime() : p.createdAt ? new Date(p.createdAt).getTime() : 0
+      return closedTime >= twentyFourHoursAgo
+    })
+  }, [positions])
+
+  const closedIndexPositions = useMemo(() => {
+    const now = Date.now()
+    const twentyFourHoursAgo = now - 24 * 60 * 60 * 1000
+    return positions.filter(p => {
+      if (p.isOpen !== false) return false
+      if (!isIndexPosition(p)) return false
+      const closedTime = p.closedAt ? new Date(p.closedAt).getTime() : p.createdAt ? new Date(p.createdAt).getTime() : 0
+      return closedTime >= twentyFourHoursAgo
+    })
+  }, [positions])
+
+  // All open positions combined for banner
+  const allOpenPositions = useMemo(() =>
+    positions.filter(p => p.isOpen !== false),
+    [positions]
+  )
+
+  // Current segment's open/closed positions (nifty/banknifty/finnifty all use index positions)
+  const isStockSegment = segmentTab === 'stocks'
+  const currentOpenPositions = isStockSegment ? openStockPositions : openIndexPositions
+  const currentClosedPositions = isStockSegment ? closedStockPositions : closedIndexPositions
+
+  // ─── Total P&L (real-time) ────────────────────────────────
+  const totalPnl = useMemo(() => {
+    return allOpenPositions.reduce((s, pos) => {
+      const livePrice = livePrices[pos.id] ?? pos.currentPrice
+      let pnl: number
+      if (pos.tradeDirection === 'BUY') {
+        pnl = (livePrice - pos.entryPrice) * pos.quantity
+      } else {
+        pnl = (pos.entryPrice - livePrice) * pos.quantity
+      }
+      return s + pnl
+    }, 0)
+  }, [allOpenPositions, livePrices])
+
+  const isLive = wsStatus === 'connected' && marketOpen
+
+  // Get live price for detail position
+  const detailLivePrice = detailPosition ? (livePrices[detailPosition.id] ?? detailPosition.currentPrice) : undefined
+
+  return (
+    <div className="min-h-screen bg-background flex flex-col">
+      <div className="flex-1 px-4 sm:px-6 lg:px-8 py-6 space-y-5 max-w-4xl mx-auto w-full">
+        {/* ── Page Header ─────────────────────────────────────── */}
+        <div className="flex items-center gap-2">
+          <h1 className="text-2xl sm:text-3xl font-bold text-foreground tracking-tight">
+            Positions
+          </h1>
+          {isLive && (
+            <span className="flex items-center gap-1 text-[10px] font-bold text-[#00B386] bg-[#00B386]/10 px-2 py-0.5 rounded-full uppercase tracking-wider">
+              <span className="size-1.5 rounded-full bg-[#00B386] animate-pulse" />
+              Live
+            </span>
+          )}
+        </div>
+        <p className="text-muted-foreground text-sm -mt-3">
+          Track and manage your trades with real-time P&amp;L updates.
+        </p>
+
+        {/* ── Total P&L Banner - only P&L, no investment ──────── */}
+        {allOpenPositions.length > 0 && (
+          <TotalPnLBanner
+            totalPnl={totalPnl}
+            openCount={allOpenPositions.length}
+            isLive={isLive}
+          />
+        )}
+
+        {/* ── Tab Switcher: Open / Closed ──────────────────────── */}
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1 bg-border/60 p-1 rounded-xl w-fit">
+            <button
+              className={`px-4 py-2 rounded-lg text-[13px] font-semibold transition-all ${
+                activeTab === 'open'
+                  ? 'bg-card text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+              onClick={() => setActiveTab('open')}
+            >
+              Open
+              <span className={`ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full ${
+                activeTab === 'open' ? 'bg-[#00D09C]/10 text-[#00D09C]' : 'bg-muted-foreground/10 text-muted-foreground'
+              }`}>
+                {allOpenPositions.length}
+              </span>
+            </button>
+            <button
+              className={`px-4 py-2 rounded-lg text-[13px] font-semibold transition-all ${
+                activeTab === 'closed'
+                  ? 'bg-card text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+              onClick={() => setActiveTab('closed')}
+            >
+              Closed
+              <span className={`ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full ${
+                activeTab === 'closed' ? 'bg-muted-foreground/10 text-foreground' : 'bg-muted-foreground/10 text-muted-foreground'
+              }`}>
+                {closedStockPositions.length + closedIndexPositions.length}
+              </span>
+            </button>
+          </div>
+        </div>
+
+        {/* ── Segment Sub-Tabs: Stocks / Index ─────────────────── */}
+        <div className="flex items-center gap-1 bg-card border border-border p-1 rounded-xl w-fit">
+          <button
+            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-[12px] font-semibold transition-all ${
+              segmentTab === 'stocks'
+                ? 'bg-[#00D09C]/10 text-[#00D09C] border border-[#00D09C]/20'
+                : 'text-muted-foreground hover:text-foreground border border-transparent'
+            }`}
+            onClick={() => setPositionsTab('stocks')}
+          >
+            <Briefcase className="size-3.5" />
+            Stocks
+            <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+              segmentTab === 'stocks'
+                ? 'bg-[#00D09C]/15 text-[#00D09C]'
+                : 'bg-muted-foreground/10 text-muted-foreground'
+            }`}>
+              {activeTab === 'open' ? openStockPositions.length : closedStockPositions.length}
+            </span>
+          </button>
+          <button
+            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-[12px] font-semibold transition-all ${
+              segmentTab === 'index'
+                ? 'bg-[#00D09C]/10 text-[#00D09C] border border-[#00D09C]/20'
+                : 'text-muted-foreground hover:text-foreground border border-transparent'
+            }`}
+            onClick={() => setPositionsTab('index')}
+          >
+            <LineChart className="size-3.5" />
+            Index
+            <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+              segmentTab === 'index'
+                ? 'bg-[#00D09C]/15 text-[#00D09C]'
+                : 'bg-muted-foreground/10 text-muted-foreground'
+            }`}>
+              {activeTab === 'open' ? openIndexPositions.length : closedIndexPositions.length}
+            </span>
+          </button>
+        </div>
+
+        {/* ── Positions List ──────────────────────────────────── */}
+        {loading ? (
+          <div className="space-y-3">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="bg-card rounded-2xl border border-border p-4">
+                <div className="flex items-start justify-between">
+                  <div className="space-y-2">
+                    <Skeleton className="h-5 w-24 bg-[#f0f0f5]" />
+                    <Skeleton className="h-3 w-32 bg-[#f0f0f5]" />
+                  </div>
+                  <Skeleton className="h-12 w-28 rounded-xl bg-[#f0f0f5]" />
+                </div>
+                <div className="flex gap-4 mt-3">
+                  <Skeleton className="h-8 w-16 bg-[#f0f0f5]" />
+                  <Skeleton className="h-8 w-16 bg-[#f0f0f5]" />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : activeTab === 'open' ? (
+          currentOpenPositions.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-20 text-center">
+              <div className="size-20 rounded-full bg-muted flex items-center justify-center mb-5">
+                {isStockSegment ? (
+                  <Briefcase className="size-9 text-muted-foreground/30" />
+                ) : (
+                  <LineChart className="size-9 text-muted-foreground/30" />
+                )}
+              </div>
+              <p className="text-foreground font-semibold text-[16px]">
+                No open {isStockSegment ? 'stock' : 'index'} positions
+              </p>
+              <p className="text-muted-foreground text-[13px] mt-1.5">
+                Place a {isStockSegment ? 'stock' : 'index'} trade to see your positions here
+              </p>
+              <Button
+                size="sm"
+                className="mt-6 gap-1.5 bg-[#00D09C] hover:bg-[#00b88a] text-white font-semibold rounded-xl px-5"
+                onClick={() => setCurrentPage(isStockSegment ? 'trading' : 'futures')}
+              >
+                <TrendingUp className="size-3.5" />
+                Start {isStockSegment ? 'Stock' : 'Index'} Trading
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {currentOpenPositions.map((pos) => {
+                const livePrice = livePrices[pos.id] ?? pos.currentPrice
+                const prevPrice = prevPricesRef.current[pos.id]
+                // Position is "live" when it has a real-time price update (SSE or WS)
+                const isPositionLive = pos.isOpen && (
+                  (pos.segment === 'EQUITY' && wsStatus === 'connected' && !!wsStockQuotes[pos.symbol] && marketOpen) ||
+                  (pos.segment !== 'EQUITY' && !!livePrices[pos.id] && livePrices[pos.id] !== pos.currentPrice)
+                )
+
+                return (
+                  <OpenPositionCard
+                    key={pos.id}
+                    pos={pos}
+                    livePrice={livePrice}
+                    prevPrice={prevPrice}
+                    prevPnl={prevPnlMap[pos.id]}
+                    isLive={isPositionLive}
+                    onSquareOff={handleSquareOff}
+                    isSquaringOff={squaringOff === pos.id}
+                    onViewDetails={handleViewDetails}
+                    onViewStrikeChart={handleOpenStrikeOverview}
+                  />
+                )
+              })}
+            </div>
+          )
+        ) : (
+          currentClosedPositions.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-20 text-center">
+              <div className="size-20 rounded-full bg-muted flex items-center justify-center mb-5">
+                <Clock className="size-9 text-muted-foreground/30" />
+              </div>
+              <p className="text-foreground font-semibold text-[16px]">
+                No closed {isStockSegment ? 'stock' : 'index'} positions today
+              </p>
+              <p className="text-muted-foreground text-[13px] mt-1.5">
+                Your today&apos;s closed {isStockSegment ? 'stock' : 'index'} trades will appear here
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {currentClosedPositions.map((pos) => (
+                <ClosedPositionCard key={pos.id} pos={pos} onViewDetails={handleViewDetails} />
+              ))}
+            </div>
+          )
+        )}
+      </div>
+
+      {/* ── Detail Sheet ────────────────────────────────────── */}
+      <PositionDetailSheet
+        position={detailPosition}
+        livePrice={detailLivePrice}
+        open={detailOpen}
+        onOpenChange={setDetailOpen}
+        onSquareOff={handleSquareOff}
+        isSquaringOff={squaringOff === detailPosition?.id}
+      />
+
+      {/* ── Strike Overview Drawer (OPTIONS only) ─────────────── */}
+      {strikeOverview && (
+        <StrikeOverviewDrawer
+          open={!!strikeOverview}
+          onOpenChange={(open) => { if (!open) setStrikeOverview(null) }}
+          underlying={strikeOverview.underlying}
+          strike={strikeOverview.strike}
+          optionType={strikeOverview.optionType}
+          expiry={''}
+          instrumentKey={strikeOverview.instrumentKey}
+          ltp={strikeOverview.ltp}
+          greeks={strikeOverview.greeks}
+          marketData={strikeOverview.marketData}
+          spot={strikeOverview.spot}
+        />
+      )}
+
+      {/* ── Sticky Footer ────────────────────────────────────── */}
+      <footer className="mt-auto border-t border-border bg-card px-4 py-3">
+        <div className="max-w-4xl mx-auto flex items-center justify-between text-[11px] text-muted-foreground">
+          <span>{isLive ? 'Live prices updating' : 'Market closed · showing last prices'}</span>
+          {isLive ? (
+            <span className="flex items-center gap-1 text-[#00B386] font-semibold">
+              <span className="size-1.5 rounded-full bg-[#00B386] animate-pulse" />
+              Market Live
+            </span>
+          ) : (
+            <span className="flex items-center gap-1 text-[#EB5B3C] font-semibold">
+              <span className="size-1.5 rounded-full bg-[#EB5B3C]" />
+              Market Closed
+            </span>
+          )}
+        </div>
+      </footer>
+    </div>
+  )
+}

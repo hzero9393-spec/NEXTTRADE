@@ -1,0 +1,857 @@
+     1→'use client'
+     2→
+     3→import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+     4→import { Card, CardContent } from '@/components/ui/card'
+     5→import { Button } from '@/components/ui/button'
+     6→import { Badge } from '@/components/ui/badge'
+     7→import { Skeleton } from '@/components/ui/skeleton'
+     8→import {
+     9→  Table,
+    10→  TableBody,
+    11→  TableCell,
+    12→  TableHead,
+    13→  TableHeader,
+    14→  TableRow,
+    15→} from '@/components/ui/table'
+    16→import {
+    17→  Landmark,
+    18→  IndianRupee,
+    19→  TrendingUp,
+    20→  TrendingDown,
+    21→  Wallet,
+    22→  ArrowUpRight,
+    23→  ArrowDownRight,
+    24→  Briefcase,
+    25→  Loader2,
+    26→  PieChart as PieChartIcon,
+    27→  Calendar as CalendarIcon,
+    28→} from 'lucide-react'
+    29→import {
+    30→  PieChart,
+    31→  Pie,
+    32→  Cell,
+    33→  ResponsiveContainer,
+    34→  Tooltip,
+    35→} from 'recharts'
+    36→import { useAuthStore } from '@/lib/auth-store'
+    37→import { useAppStore } from '@/lib/store'
+    38→import { motion } from 'framer-motion'
+    39→import { toast } from 'sonner'
+    40→import { formatINR, formatINRWhole, formatPercent, formatPrice } from '@/lib/format'
+    41→import { DateFilter, DateFilterPreset, DateRange, getDateRange, isDateInRange } from '@/components/pepertect/date-filter'
+    42→import { useStockData } from '@/hooks/use-market-data'
+    43→
+    44→// ─── Types ───────────────────────────────────────────────────────
+    45→
+    46→interface PositionData {
+    47→  id: string
+    48→  segment: string
+    49→  productType: string
+    50→  tradeDirection: string
+    51→  symbol: string
+    52→  optionType?: string | null
+    53→  strikePrice?: number | null
+    54→  expiryDate?: string | null
+    55→  quantity: number
+    56→  entryPrice: number
+    57→  currentPrice: number
+    58→  totalInvested: number
+    59→  currentValue: number
+    60→  unrealizedPnl: number
+    61→  unrealizedPnlPercent: number
+    62→  marginUsed: number
+    63→  isOpen: boolean
+    64→  createdAt: string
+    65→}
+    66→
+    67→interface PortfolioData {
+    68→  virtualBalance: number
+    69→  marginUsed: number
+    70→  availableMargin: number
+    71→  totalInvested: number
+    72→  totalCurrentValue: number
+    73→  totalUnrealizedPnl: number
+    74→  totalRealizedPnl: number
+    75→  totalPortfolioValue: number
+    76→  totalPnl: number
+    77→  totalReturn: number
+    78→  totalTrades: number
+    79→  initialCapital: number
+    80→  openPositionsCount: number
+    81→  positions?: PositionData[]
+    82→  segments?: {
+    83→    equity: { count: number; invested: number; currentValue: number; unrealizedPnl: number; positions?: PositionData[] }
+    84→    futures: { count: number; invested: number; currentValue: number; unrealizedPnl: number; marginUsed: number; positions?: PositionData[] }
+    85→    options: { count: number; invested: number; currentValue: number; unrealizedPnl: number; marginUsed: number; positions?: PositionData[] }
+    86→  }
+    87→}
+    88→
+    89→// ─── Component ───────────────────────────────────────────────────
+    90→
+    91→export default function PortfolioPage() {
+    92→  const { token } = useAuthStore()
+    93→  const { setCurrentPage, dateFilterPreset, dateFilterRange, setDateFilter } = useAppStore()
+    94→  const [portfolio, setPortfolio] = useState<PortfolioData | null>(null)
+    95→  const [positions, setPositions] = useState<PositionData[]>([])
+    96→  const [loading, setLoading] = useState(true)
+    97→  const [squaringOff, setSquaringOff] = useState<string | null>(null)
+    98→
+    99→  // ─── Real-Time Market Data (1s polling) ────────────────────────
+   100→  const { stocks: wsStockQuotes, status: wsStatus } = useStockData()
+   101→
+   102→  // ─── Live prices map (separate from positions for stable rendering) ──
+   103→  const livePricesRef = useRef<Record<string, number>>({})
+   104→  const [livePrices, setLivePrices] = useState<Record<string, number>>({})
+   105→
+   106→  // Update live prices only when they actually change
+   107→  useEffect(() => {
+   108→    if (wsStatus !== 'connected') return
+   109→
+   110→    const updates: Record<string, number> = {}
+   111→    let hasChanges = false
+   112→
+   113→    for (const pos of positions) {
+   114→      if (pos.segment === 'EQUITY') {
+   115→        const quote = wsStockQuotes[pos.symbol]
+   116→        if (quote && quote.last_price > 0) {
+   117→          const newPrice = quote.last_price
+   118→          if (livePricesRef.current[pos.symbol] !== newPrice) {
+   119→            updates[pos.symbol] = newPrice
+   120→            hasChanges = true
+   121→          }
+   122→        }
+   123→      }
+   124→    }
+   125→
+   126→    if (hasChanges) {
+   127→      livePricesRef.current = { ...livePricesRef.current, ...updates }
+   128→      setLivePrices(prev => ({ ...prev, ...updates }))
+   129→    }
+   130→  }, [wsStockQuotes, wsStatus, positions])
+   131→
+   132→  // ─── Single API call that returns BOTH portfolio + positions ──
+   133→  const fetchPortfolio = useCallback(async () => {
+   134→    if (!token) return
+   135→    try {
+   136→      const res = await fetch('/api/trade/portfolio', {
+   137→        headers: { Authorization: `Bearer ${token}` },
+   138→      })
+   139→      if (res.ok) {
+   140→        const json = await res.json()
+   141→        const data = json.data as PortfolioData
+   142→        setPortfolio(data)
+   143→        // Extract positions from portfolio response (no separate API call needed!)
+   144→        if (data.positions && data.positions.length > 0) {
+   145→          setPositions(data.positions)
+   146→        } else if (data.segments) {
+   147→          // Fallback: extract from segments
+   148→          const allPositions = [
+   149→            ...(data.segments.equity.positions || []),
+   150→            ...(data.segments.futures.positions || []),
+   151→            ...(data.segments.options.positions || []),
+   152→          ]
+   153→          setPositions(allPositions)
+   154→        } else {
+   155→          setPositions([])
+   156→        }
+   157→      }
+   158→    } catch {
+   159→      // silent
+   160→    }
+   161→  }, [token])
+   162→
+   163→  const loadData = useCallback(async () => {
+   164→    setLoading(true)
+   165→    await fetchPortfolio()
+   166→    setLoading(false)
+   167→  }, [fetchPortfolio])
+   168→
+   169→  useEffect(() => {
+   170→    loadData()
+   171→    // Auto-refresh every 30s (prices are updated in real-time via useStockData)
+   172→    const interval = setInterval(fetchPortfolio, 30000)
+   173→    return () => clearInterval(interval)
+   174→  }, [loadData, fetchPortfolio])
+   175→
+   176→  const handleSquareOff = async (positionId: string, symbol: string) => {
+   177→    if (!token) return
+   178→    setSquaringOff(positionId)
+   179→    try {
+   180→      const res = await fetch('/api/trade/square-off', {
+   181→        method: 'POST',
+   182→        headers: {
+   183→          Authorization: `Bearer ${token}`,
+   184→          'Content-Type': 'application/json',
+   185→        },
+   186→        body: JSON.stringify({ positionId }),
+   187→      })
+   188→      const data = await res.json()
+   189→      if (res.ok && data.success) {
+   190→        toast.success(`Squared off ${symbol}`)
+   191→        // Optimistic update: remove the position from local state immediately
+   192→        setPositions(prev => prev.filter(p => p.id !== positionId))
+   193→        // Then refresh from server
+   194→        fetchPortfolio()
+   195→      } else {
+   196→        toast.error(data.error || 'Failed to square off')
+   197→      }
+   198→    } catch {
+   199→      toast.error('Network error')
+   200→    } finally {
+   201→      setSquaringOff(null)
+   202→    }
+   203→  }
+   204→
+   205→  // ─── Date Filter Logic ─────────────────────────────────
+   206→  const activeDateRange = useMemo(() => getDateRange(dateFilterPreset, dateFilterRange), [dateFilterPreset, dateFilterRange])
+   207→
+   208→  const handleDateFilterChange = useCallback((preset: DateFilterPreset, range?: DateRange) => {
+   209→    setDateFilter(preset, range)
+   210→  }, [setDateFilter])
+   211→
+   212→  // ─── Merge Real-Time Prices into Positions ─────────────────────
+   213→  const enrichedPositions = useMemo(() => {
+   214→    return positions.map(pos => {
+   215→      // For EQUITY positions, use live prices (1s updates)
+   216→      if (pos.segment === 'EQUITY') {
+   217→        const livePrice = livePrices[pos.symbol]
+   218→        if (livePrice && livePrice > 0) {
+   219→          let unrealizedPnl: number
+   220→          if (pos.tradeDirection === 'BUY') {
+   221→            unrealizedPnl = (livePrice - pos.entryPrice) * pos.quantity
+   222→          } else {
+   223→            unrealizedPnl = (pos.entryPrice - livePrice) * pos.quantity
+   224→          }
+   225→          const currentValue = pos.quantity * livePrice
+   226→          return {
+   227→            ...pos,
+   228→            currentPrice: livePrice,
+   229→            currentValue,
+   230→            unrealizedPnl: Math.round(unrealizedPnl * 100) / 100,
+   231→            unrealizedPnlPercent: pos.totalInvested > 0
+   232→              ? Math.round((unrealizedPnl / pos.totalInvested) * 10000) / 100
+   233→              : 0,
+   234→          }
+   235→        }
+   236→      }
+   237→      return pos
+   238→    })
+   239→  }, [positions, livePrices])
+   240→
+   241→  const filteredPositions = useMemo(() =>
+   242→    enrichedPositions.filter(p => isDateInRange(p.createdAt, activeDateRange)),
+   243→    [enrichedPositions, activeDateRange]
+   244→  )
+   245→
+   246→  // ─── Computed from filtered positions ──────────────────────
+   247→  const filteredInvestedAmount = useMemo(() =>
+   248→    filteredPositions.reduce((s, p) => s + p.totalInvested, 0),
+   249→    [filteredPositions]
+   250→  )
+   251→
+   252→  const filteredCurrentValue = useMemo(() =>
+   253→    filteredPositions.reduce((s, p) => s + p.currentValue, 0),
+   254→    [filteredPositions]
+   255→  )
+   256→
+   257→  const filteredUnrealizedPnl = useMemo(() =>
+   258→    filteredPositions.reduce((s, p) => s + p.unrealizedPnl, 0),
+   259→    [filteredPositions]
+   260→  )
+   261→
+   262→  // Realized P&L comes from the API (closed positions aren't in the positions table)
+   263→  const realizedPnl = portfolio?.totalRealizedPnl ?? 0
+   264→
+   265→  // Total P&L = unrealized from filtered + realized from API
+   266→  const totalPnl = useMemo(() =>
+   267→    filteredUnrealizedPnl + realizedPnl,
+   268→    [filteredUnrealizedPnl, realizedPnl]
+   269→  )
+   270→
+   271→  // Total portfolio value = balance + filtered current value of positions
+   272→  const totalValue = useMemo(() =>
+   273→    (portfolio?.virtualBalance ?? 0) + filteredCurrentValue,
+   274→    [portfolio?.virtualBalance, filteredCurrentValue]
+   275→  )
+   276→
+   277→  const investedAmount = filteredInvestedAmount
+   278→  const currentvalue = filteredCurrentValue
+   279→  const unrealizedPnl = filteredUnrealizedPnl
+   280→
+   281→  const totalReturn = useMemo(() => {
+   282→    const initialCapital = portfolio?.initialCapital ?? 100000
+   283→    if (initialCapital === 0) return 0
+   284→    return ((totalPnl / initialCapital) * 100)
+   285→  }, [totalPnl, portfolio?.initialCapital])
+   286→
+   287→  // Allocation data from filtered positions
+   288→  const allocationData = useMemo(() => {
+   289→    if (!portfolio) return []
+   290→    return [
+   291→      { name: 'Positions', value: filteredCurrentValue, color: '#00D09C' },
+   292→      { name: 'Cash', value: portfolio.virtualBalance, color: '#c7d2fe' },
+   293→    ].filter(d => d.value > 0)
+   294→  }, [portfolio, filteredCurrentValue])
+   295→
+   296→  const allocationTotal = useMemo(() =>
+   297→    allocationData.reduce((s, d) => s + d.value, 0),
+   298→    [allocationData]
+   299→  )
+   300→
+   301→  // Segment breakdown computed from filtered positions
+   302→  const segmentBreakdown = useMemo(() => {
+   303→    const equityPositions = filteredPositions.filter(p => p.segment === 'EQUITY' || p.segment === 'CASH')
+   304→    const futuresPositions = filteredPositions.filter(p => p.segment === 'FUTURES')
+   305→    const optionsPositions = filteredPositions.filter(p => p.segment === 'OPTIONS')
+   306→
+   307→    return [
+   308→      {
+   309→        name: 'Equity',
+   310→        count: equityPositions.length,
+   311→        value: equityPositions.reduce((s, p) => s + p.currentValue, 0),
+   312→        pnl: equityPositions.reduce((s, p) => s + p.unrealizedPnl, 0),
+   313→        invested: equityPositions.reduce((s, p) => s + p.totalInvested, 0),
+   314→        icon: TrendingUp,
+   315→        color: '#00D09C',
+   316→      },
+   317→      {
+   318→        name: 'Futures',
+   319→        count: futuresPositions.length,
+   320→        value: futuresPositions.reduce((s, p) => s + p.currentValue, 0),
+   321→        pnl: futuresPositions.reduce((s, p) => s + p.unrealizedPnl, 0),
+   322→        invested: futuresPositions.reduce((s, p) => s + p.totalInvested, 0),
+   323→        icon: Landmark,
+   324→        color: '#00d09c',
+   325→      },
+   326→      {
+   327→        name: 'Options',
+   328→        count: optionsPositions.length,
+   329→        value: optionsPositions.reduce((s, p) => s + p.currentValue, 0),
+   330→        pnl: optionsPositions.reduce((s, p) => s + p.unrealizedPnl, 0),
+   331→        invested: optionsPositions.reduce((s, p) => s + p.totalInvested, 0),
+   332→        icon: IndianRupee,
+   333→        color: '#eb5b3c',
+   334→      },
+   335→    ].filter(s => s.count > 0 || s.invested > 0)
+   336→  }, [filteredPositions])
+   337→
+   338→  return (
+   339→    <div className="min-h-screen bg-background px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+   340→      {/* ── Page Header ───────────────────────────────────── */}
+   341→      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+   342→        <div>
+   343→          <div className="flex items-center gap-2">
+   344→            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">
+   345→              Portfolio
+   346→            </h1>
+   347→            {wsStatus === 'connected' && (
+   348→              <span className="flex items-center gap-1 text-[10px] font-bold text-[#00B386] bg-[#00B386]/10 px-2 py-0.5 rounded-full uppercase tracking-wider">
+   349→                <span className="size-1.5 rounded-full bg-[#00B386] animate-pulse" />
+   350→                LIVE
+   351→              </span>
+   352→            )}
+   353→          </div>
+   354→          <p className="mt-1 text-sm text-muted-foreground">
+   355→            Track your holdings, returns, and allocation in real-time.
+   356→          </p>
+   357→        </div>
+   358→        <div className="flex items-center gap-3 flex-wrap">
+   359→          <DateFilter
+   360→            value={dateFilterPreset}
+   361→            onChange={handleDateFilterChange}
+   362→            customRange={dateFilterRange}
+   363→          />
+   364→          <Button
+   365→            className="gap-1.5 rounded-lg bg-[#00D09C] text-white font-semibold shadow-md hover:bg-[#00b88a] active:scale-[0.98]"
+   366→            onClick={() => setCurrentPage('trading')}
+   367→          >
+   368→            <TrendingUp className="size-4" />
+   369→            New Trade
+   370→          </Button>
+   371→        </div>
+   372→      </div>
+   373→
+   374→      {/* ── Date Filter Info ────────────────────────────────────── */}
+   375→      {dateFilterPreset !== 'all' && (filteredPositions.length > 0 || positions.length > 0) && (
+   376→        <div className="flex items-center gap-2 text-xs text-muted-foreground bg-card px-3 py-2 rounded-lg border border-border/50">
+   377→          <CalendarIcon className="size-3.5 text-[#00D09C]" />
+   378→          Showing {filteredPositions.length} of {positions.length} positions for{' '}
+   379→          <span className="font-semibold text-foreground">
+   380→            {dateFilterPreset === 'custom' && dateFilterRange
+   381→              ? `${new Date(dateFilterRange.from).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })} → ${new Date(dateFilterRange.to).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}`
+   382→              : dateFilterPreset.charAt(0).toUpperCase() + dateFilterPreset.slice(1)}
+   383→          </span>
+   384→        </div>
+   385→      )}
+   386→
+   387→      {loading ? (
+   388→        <div className="space-y-6">
+   389→          <Card className="bg-card border border-border rounded-xl shadow-sm">
+   390→            <CardContent className="p-6">
+   391→              <Skeleton className="h-4 w-32 mb-3 bg-muted" />
+   392→              <Skeleton className="h-10 w-48 mb-4 bg-muted" />
+   393→              <div className="grid grid-cols-3 gap-4">
+   394→                <Skeleton className="h-16 w-full rounded-lg bg-muted" />
+   395→                <Skeleton className="h-16 w-full rounded-lg bg-muted" />
+   396→                <Skeleton className="h-16 w-full rounded-lg bg-muted" />
+   397→              </div>
+   398→            </CardContent>
+   399→          </Card>
+   400→          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+   401→            {Array.from({ length: 4 }).map((_, i) => (
+   402→              <Card key={i} className="bg-card border border-border rounded-xl shadow-sm">
+   403→                <CardContent className="p-5">
+   404→                  <Skeleton className="h-4 w-24 mb-3 bg-muted" />
+   405→                  <Skeleton className="h-8 w-36 mb-2 bg-muted" />
+   406→                  <Skeleton className="h-4 w-28 bg-muted" />
+   407→                </CardContent>
+   408→              </Card>
+   409→            ))}
+   410→          </div>
+   411→        </div>
+   412→      ) : (
+   413→        <>
+   414→          {/* ── Total Portfolio Value Card ─────────────────────── */}
+   415→          <motion.div
+   416→            initial={{ opacity: 0, y: 20 }}
+   417→            animate={{ opacity: 1, y: 0 }}
+   418→            transition={{ duration: 0.5, ease: [0.34, 1.56, 0.64, 1] }}
+   419→          >
+   420→            <Card className="bg-card border border-border rounded-xl shadow-sm">
+   421→              <CardContent className="p-6">
+   422→                <div className="flex items-center justify-between mb-2">
+   423→                  <p className="text-xs font-semibold text-muted-foreground tracking-wider uppercase">
+   424→                    Total Portfolio Value
+   425→                  </p>
+   426→                  <div className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-bold ${
+   427→                    totalPnl >= 0
+   428→                      ? 'bg-[#00B386]/10 text-[#00B386]'
+   429→                      : 'bg-[#EB5B3C]/10 text-[#EB5B3C]'
+   430→                  }`}>
+   431→                    {totalPnl >= 0 ? <ArrowUpRight className="size-3.5" /> : <ArrowDownRight className="size-3.5" />}
+   432→                    {totalPnl >= 0 ? '+' : '-'}{formatINR(Math.abs(totalPnl))}
+   433→                    <span className="ml-0.5">({formatPercent(totalReturn)})</span>
+   434→                  </div>
+   435→                </div>
+   436→
+   437→                <div className="flex items-baseline gap-1 mb-6">
+   438→                  <span className="text-3xl sm:text-4xl font-bold font-mono-data font-tabular text-foreground">
+   439→                    {formatINRWhole(totalValue)}
+   440→                  </span>
+   441→                  <span className="text-lg text-muted-foreground">
+   442→                    .{Math.abs(totalValue % 1).toFixed(2).substring(2)}
+   443→                  </span>
+   444→                </div>
+   445→
+   446→                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+   447→                  <div className="bg-card rounded-xl p-4 border border-border/50">
+   448→                    <div className="flex items-center gap-2 mb-1.5">
+   449→                      <div className="size-7 rounded-lg bg-[#00D09C]/10 flex items-center justify-center">
+   450→                        <Wallet className="size-3.5 text-[#00D09C]" />
+   451→                      </div>
+   452→                      <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Available Balance</span>
+   453→                    </div>
+   454→                    <span className="text-lg font-bold font-mono-data font-tabular text-foreground">
+   455→                      {formatINR(portfolio?.virtualBalance ?? 100000)}
+   456→                    </span>
+   457→                  </div>
+   458→                  <div className="bg-card rounded-xl p-4 border border-border/50">
+   459→                    <div className="flex items-center gap-2 mb-1.5">
+   460→                      <div className="size-7 rounded-lg bg-[#6b7280]/10 flex items-center justify-center">
+   461→                        <IndianRupee className="size-3.5 text-muted-foreground" />
+   462→                      </div>
+   463→                      <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Invested</span>
+   464→                    </div>
+   465→                    <span className="text-lg font-bold font-mono-data font-tabular text-foreground">
+   466→                      {formatINR(investedAmount)}
+   467→                    </span>
+   468→                  </div>
+   469→                  <div className="bg-card rounded-xl p-4 border border-border/50">
+   470→                    <div className="flex items-center gap-2 mb-1.5">
+   471→                      <div className="size-7 rounded-lg bg-[#00B386]/10 flex items-center justify-center">
+   472→                        <Landmark className="size-3.5 text-[#00B386]" />
+   473→                      </div>
+   474→                      <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Current Value</span>
+   475→                    </div>
+   476→                    <span className="text-lg font-bold font-mono-data font-tabular text-foreground">
+   477→                      {formatINR(currentvalue)}
+   478→                    </span>
+   479→                  </div>
+   480→                </div>
+   481→              </CardContent>
+   482→            </Card>
+   483→          </motion.div>
+   484→
+   485→          {/* ── Summary Cards Row ─────────────────────────────────── */}
+   486→          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+   487→            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
+   488→              <Card className={`bg-card border border-border rounded-xl shadow-sm border-l-4 ${totalPnl >= 0 ? 'border-l-[#00d09c]' : 'border-l-[#eb5b3c]'}`}>
+   489→                <CardContent className="p-5">
+   490→                  <div className="mb-2 flex items-start justify-between">
+   491→                    <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Total P&amp;L</p>
+   492→                    <div className={`size-7 rounded-lg flex items-center justify-center ${totalPnl >= 0 ? 'bg-[#00B386]/10' : 'bg-[#EB5B3C]/10'}`}>
+   493→                      {totalPnl >= 0 ? <TrendingUp className="size-3.5 text-[#00B386]" /> : <TrendingDown className="size-3.5 text-[#EB5B3C]" />}
+   494→                    </div>
+   495→                  </div>
+   496→                  <h3 className={`font-mono-data font-tabular text-2xl font-bold ${totalPnl >= 0 ? 'text-[#00B386]' : 'text-[#EB5B3C]'}`}>
+   497→                    {totalPnl >= 0 ? '+' : '-'}{formatINR(Math.abs(totalPnl))}
+   498→                  </h3>
+   499→                  <div className={`mt-2 flex items-center gap-1 text-xs font-semibold ${totalPnl >= 0 ? 'text-[#00B386]' : 'text-[#EB5B3C]'}`}>
+   500→                    {totalPnl >= 0 ? <ArrowUpRight className="size-3.5" /> : <ArrowDownRight className="size-3.5" />}
+   501→                    {formatPercent(totalReturn)} returns
+   502→                  </div>
+   503→                </CardContent>
+   504→              </Card>
+   505→            </motion.div>
+   506→
+   507→            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
+   508→              <Card className={`bg-card border border-border rounded-xl shadow-sm border-l-4 ${unrealizedPnl >= 0 ? 'border-l-[#00d09c]' : 'border-l-[#eb5b3c]'}`}>
+   509→                <CardContent className="p-5">
+   510→                  <div className="mb-2 flex items-start justify-between">
+   511→                    <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Unrealized P&amp;L</p>
+   512→                    <div className={`size-7 rounded-lg flex items-center justify-center ${unrealizedPnl >= 0 ? 'bg-[#00B386]/10' : 'bg-[#EB5B3C]/10'}`}>
+   513→                      {unrealizedPnl >= 0 ? <TrendingUp className="size-3.5 text-[#00B386]" /> : <TrendingDown className="size-3.5 text-[#EB5B3C]" />}
+   514→                    </div>
+   515→                  </div>
+   516→                  <h3 className={`font-mono-data font-tabular text-2xl font-bold ${unrealizedPnl >= 0 ? 'text-[#00B386]' : 'text-[#EB5B3C]'}`}>
+   517→                    {unrealizedPnl >= 0 ? '+' : '-'}{formatINR(Math.abs(unrealizedPnl))}
+   518→                  </h3>
+   519→                  <div className={`mt-2 flex items-center gap-1 text-xs font-semibold ${unrealizedPnl >= 0 ? 'text-[#00B386]' : 'text-[#EB5B3C]'}`}>
+   520→                    {unrealizedPnl >= 0 ? <ArrowUpRight className="size-3.5" /> : <ArrowDownRight className="size-3.5" />}
+   521→                    {formatPercent(investedAmount > 0 ? (unrealizedPnl / investedAmount) * 100 : 0)} ROI
+   522→                  </div>
+   523→                </CardContent>
+   524→              </Card>
+   525→            </motion.div>
+   526→
+   527→            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}>
+   528→              <Card className={`bg-card border border-border rounded-xl shadow-sm border-l-4 ${realizedPnl >= 0 ? 'border-l-[#00d09c]' : 'border-l-[#eb5b3c]'}`}>
+   529→                <CardContent className="p-5">
+   530→                  <div className="mb-2 flex items-start justify-between">
+   531→                    <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Realized P&amp;L</p>
+   532→                    <div className={`size-7 rounded-lg flex items-center justify-center ${realizedPnl >= 0 ? 'bg-[#00B386]/10' : 'bg-[#EB5B3C]/10'}`}>
+   533→                      <Wallet className={`size-3.5 ${realizedPnl >= 0 ? 'text-[#00B386]' : 'text-[#EB5B3C]'}`} />
+   534→                    </div>
+   535→                  </div>
+   536→                  <h3 className={`font-mono-data font-tabular text-2xl font-bold ${realizedPnl >= 0 ? 'text-[#00B386]' : 'text-[#EB5B3C]'}`}>
+   537→                    {realizedPnl >= 0 ? '+' : '-'}{formatINR(Math.abs(realizedPnl))}
+   538→                  </h3>
+   539→                  <div className="mt-2 flex items-center gap-1 text-xs font-semibold text-muted-foreground">
+   540→                    From closed positions
+   541→                  </div>
+   542→                </CardContent>
+   543→              </Card>
+   544→            </motion.div>
+   545→
+   546→            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}>
+   547→              <Card className="bg-card border border-border rounded-xl shadow-sm border-l-4 border-l-[#00D09C]">
+   548→                <CardContent className="p-5">
+   549→                  <div className="mb-2 flex items-start justify-between">
+   550→                    <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Open Positions</p>
+   551→                    <div className="size-7 rounded-lg bg-[#00D09C]/10 flex items-center justify-center">
+   552→                      <Briefcase className="size-3.5 text-[#00D09C]" />
+   553→                    </div>
+   554→                  </div>
+   555→                  <h3 className="font-mono-data font-tabular text-2xl font-bold text-foreground">
+   556→                    {filteredPositions.length}
+   557→                  </h3>
+   558→                  <div className="mt-2 flex items-center gap-1 text-xs font-semibold text-[#00D09C]">
+   559→                    {positions.length} total positions
+   560→                  </div>
+   561→                </CardContent>
+   562→              </Card>
+   563→            </motion.div>
+   564→          </div>
+   565→
+   566→          {/* ── Holdings Table ────────────────────────────────── */}
+   567→          <motion.div
+   568→            initial={{ opacity: 0, y: 20 }}
+   569→            animate={{ opacity: 1, y: 0 }}
+   570→            transition={{ delay: 0.3, duration: 0.5, ease: [0.34, 1.56, 0.64, 1] }}
+   571→          >
+   572→            <Card className="bg-card border border-border rounded-xl shadow-sm overflow-hidden">
+   573→              <div className="flex items-center justify-between border-b border-border px-6 py-4">
+   574→                <h4 className="text-lg font-semibold text-foreground">Holdings</h4>
+   575→                <Badge variant="secondary" className="bg-[#00D09C]/10 text-[#00D09C] border-0 text-xs font-semibold">
+   576→                  {filteredPositions.length} Active
+   577→                </Badge>
+   578→              </div>
+   579→
+   580→              {filteredPositions.length === 0 ? (
+   581→                <div className="flex flex-col items-center justify-center py-16 text-center">
+   582→                  <div className="size-14 rounded-full bg-background flex items-center justify-center mb-4">
+   583→                    <Briefcase className="size-7 text-muted-foreground/40" />
+   584→                  </div>
+   585→                  <p className="text-foreground font-semibold text-sm">Your portfolio is empty</p>
+   586→                  <p className="text-muted-foreground text-xs mt-1">Start trading to see your holdings here</p>
+   587→                  <Button
+   588→                    size="sm"
+   589→                    className="mt-4 gap-1.5 bg-[#00D09C] hover:bg-[#00b88a] text-white font-semibold rounded-lg"
+   590→                    onClick={() => setCurrentPage('trading')}
+   591→                  >
+   592→                    <TrendingUp className="size-3.5" />
+   593→                    Start Trading
+   594→                  </Button>
+   595→                </div>
+   596→              ) : (
+   597→                <div className="overflow-x-auto">
+   598→                  <Table>
+   599→                    <TableHeader>
+   600→                      <TableRow className="hover:bg-transparent border-b border-border">
+   601→                        <TableHead className="text-xs font-semibold text-muted-foreground tracking-wider uppercase bg-card">Symbol</TableHead>
+   602→                        <TableHead className="text-xs font-semibold text-muted-foreground tracking-wider uppercase bg-card">Direction</TableHead>
+   603→                        <TableHead className="text-xs font-semibold text-muted-foreground tracking-wider uppercase bg-card">Segment</TableHead>
+   604→                        <TableHead className="text-right text-xs font-semibold text-muted-foreground tracking-wider uppercase bg-card">Qty</TableHead>
+   605→                        <TableHead className="text-right text-xs font-semibold text-muted-foreground tracking-wider uppercase bg-card">Avg Price</TableHead>
+   606→                        <TableHead className="text-right text-xs font-semibold text-muted-foreground tracking-wider uppercase bg-card">LTP</TableHead>
+   607→                        <TableHead className="text-right text-xs font-semibold text-muted-foreground tracking-wider uppercase bg-card">P&amp;L</TableHead>
+   608→                        <TableHead className="text-right text-xs font-semibold text-muted-foreground tracking-wider uppercase bg-card">Current Value</TableHead>
+   609→                        <TableHead className="text-center text-xs font-semibold text-muted-foreground tracking-wider uppercase bg-card">Action</TableHead>
+   610→                      </TableRow>
+   611→                    </TableHeader>
+   612→                    <TableBody className="divide-y divide-border">
+   613→                      {filteredPositions.map((pos) => {
+   614→                        const isLong = pos.tradeDirection === 'BUY'
+   615→                        const pnlValue = pos.unrealizedPnl
+   616→                        const pnlPercent = pos.unrealizedPnlPercent
+   617→                        const isPositive = pnlValue >= 0
+   618→
+   619→                        return (
+   620→                          <TableRow key={pos.id} className="hover:bg-card transition-colors">
+   621→                            <TableCell>
+   622→                              <div className="flex flex-col">
+   623→                                <span className="text-sm font-bold text-[#00D09C]">{pos.symbol}</span>
+   624→                                {pos.segment === 'OPTIONS' && pos.strikePrice && (
+   625→                                  <span className="text-[10px] uppercase text-muted-foreground">
+   626→                                    {pos.strikePrice} {pos.optionType}
+   627→                                  </span>
+   628→                                )}
+   629→                              </div>
+   630→                            </TableCell>
+   631→                            <TableCell>
+   632→                              <Badge variant="secondary" className={`text-[10px] font-semibold border-0 gap-0.5 ${
+   633→                                isLong ? 'bg-[#00B386]/10 text-[#00B386]' : 'bg-[#EB5B3C]/10 text-[#EB5B3C]'
+   634→                              }`}>
+   635→                                {isLong ? <ArrowUpRight className="size-2.5" /> : <ArrowDownRight className="size-2.5" />}
+   636→                                {isLong ? 'Long' : 'Short'}
+   637→                              </Badge>
+   638→                            </TableCell>
+   639→                            <TableCell className="text-xs text-muted-foreground">{pos.segment}</TableCell>
+   640→                            <TableCell className="text-right font-mono-data font-tabular text-sm text-foreground">{pos.quantity}</TableCell>
+   641→                            <TableCell className="text-right font-mono-data font-tabular text-sm text-muted-foreground">{formatINR(pos.entryPrice)}</TableCell>
+   642→                            <TableCell className="text-right font-mono-data font-tabular text-sm text-foreground">{formatINR(pos.currentPrice)}</TableCell>
+   643→                            <TableCell className="text-right">
+   644→                              <div className="flex flex-col items-end">
+   645→                                <span className={`font-mono-data font-tabular text-sm font-semibold ${isPositive ? 'text-[#00B386]' : 'text-[#EB5B3C]'}`}>
+   646→                                  {isPositive ? '+' : '-'}{formatINR(Math.abs(pnlValue))}
+   647→                                </span>
+   648→                                <span className={`text-[10px] font-semibold ${isPositive ? 'text-[#00B386]' : 'text-[#EB5B3C]'}`}>
+   649→                                  {formatPercent(pnlPercent)}
+   650→                                </span>
+   651→                              </div>
+   652→                            </TableCell>
+   653→                            <TableCell className="text-right font-mono-data font-tabular text-sm font-medium text-foreground">
+   654→                              {formatINR(pos.currentValue)}
+   655→                            </TableCell>
+   656→                            <TableCell className="text-center">
+   657→                              <Button
+   658→                                variant="ghost"
+   659→                                size="sm"
+   660→                                className="rounded-lg border border-[#eb5b3c]/30 bg-[#EB5B3C]/5 px-3 py-1.5 text-[11px] font-semibold text-[#EB5B3C] transition-all hover:bg-[#eb5b3c] hover:text-white hover:border-[#eb5b3c] active:scale-95"
+   661→                                disabled={squaringOff === pos.id}
+   662→                                onClick={() => handleSquareOff(pos.id, pos.symbol)}
+   663→                              >
+   664→                                {squaringOff === pos.id ? (
+   665→                                  <Loader2 className="size-3.5 animate-spin" />
+   666→                                ) : (
+   667→                                  'Square Off'
+   668→                                )}
+   669→                              </Button>
+   670→                            </TableCell>
+   671→                          </TableRow>
+   672→                        )
+   673→                      })}
+   674→                    </TableBody>
+   675→                  </Table>
+   676→                </div>
+   677→              )}
+   678→            </Card>
+   679→          </motion.div>
+   680→
+   681→          {/* ── Segment Breakdown Cards ──────────────────────────── */}
+   682→          {segmentBreakdown.length > 0 && (
+   683→            <motion.div
+   684→              initial={{ opacity: 0, y: 20 }}
+   685→              animate={{ opacity: 1, y: 0 }}
+   686→              transition={{ delay: 0.4, duration: 0.5, ease: [0.34, 1.56, 0.64, 1] }}
+   687→            >
+   688→              <div className="flex items-center justify-between mb-4">
+   689→                <h4 className="text-lg font-semibold text-foreground">Segment Breakdown</h4>
+   690→              </div>
+   691→              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+   692→                {segmentBreakdown.map((segment) => {
+   693→                  const Icon = segment.icon
+   694→                  const isProfit = segment.pnl >= 0
+   695→                  const pnlPercent = segment.invested > 0
+   696→                    ? (segment.pnl / segment.invested) * 100
+   697→                    : 0
+   698→                  return (
+   699→                    <Card key={segment.name} className="bg-card border border-border rounded-xl shadow-sm hover:shadow-md hover:border-[#00D09C]/20 transition-all duration-300">
+   700→                      <CardContent className="p-5">
+   701→                        <div className="flex items-center justify-between mb-4">
+   702→                          <div className="flex items-center gap-2.5">
+   703→                            <div className="size-9 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${segment.color}12` }}>
+   704→                              <Icon className="size-4" style={{ color: segment.color }} />
+   705→                            </div>
+   706→                            <div>
+   707→                              <span className="text-sm font-semibold text-foreground">{segment.name}</span>
+   708→                              <span className="ml-1.5 text-[10px] text-muted-foreground">
+   709→                                {segment.count} pos{segment.count !== 1 ? 's' : ''}
+   710→                              </span>
+   711→                            </div>
+   712→                          </div>
+   713→                          <Badge variant="outline" className={`text-[10px] font-semibold border-0 ${
+   714→                            isProfit ? 'bg-[#00B386]/10 text-[#00B386]' : 'bg-[#EB5B3C]/10 text-[#EB5B3C]'
+   715→                          }`}>
+   716→                            {formatPercent(pnlPercent)}
+   717→                          </Badge>
+   718→                        </div>
+   719→                        <div className="space-y-2">
+   720→                          <div className="flex items-center justify-between">
+   721→                            <span className="text-xs text-muted-foreground">Current Value</span>
+   722→                            <span className="font-mono-data font-tabular text-sm font-semibold text-foreground">{formatINRWhole(segment.value)}</span>
+   723→                          </div>
+   724→                          <div className="flex items-center justify-between">
+   725→                            <span className="text-xs text-muted-foreground">Invested</span>
+   726→                            <span className="font-mono-data font-tabular text-sm text-muted-foreground">{formatINRWhole(segment.invested)}</span>
+   727→                          </div>
+   728→                          <div className="h-px bg-[#e5e7eb]" />
+   729→                          <div className="flex items-center justify-between">
+   730→                            <span className="text-xs text-muted-foreground">P&amp;L</span>
+   731→                            <span className={`font-mono-data font-tabular text-sm font-semibold ${isProfit ? 'text-[#00B386]' : 'text-[#EB5B3C]'}`}>
+   732→                              {isProfit ? '+' : '-'}{formatINR(Math.abs(segment.pnl))}
+   733→                            </span>
+   734→                          </div>
+   735→                        </div>
+   736→                      </CardContent>
+   737→                    </Card>
+   738→                  )
+   739→                })}
+   740→              </div>
+   741→            </motion.div>
+   742→          )}
+   743→
+   744→          {/* ── Bottom Section: Allocation + Account Details ──── */}
+   745→          <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+   746→            <motion.div
+   747→              initial={{ opacity: 0, y: 20 }}
+   748→              animate={{ opacity: 1, y: 0 }}
+   749→              transition={{ delay: 0.5, duration: 0.5, ease: [0.34, 1.56, 0.64, 1] }}
+   750→              className="lg:col-span-2"
+   751→            >
+   752→              <Card className="bg-card border border-border rounded-xl shadow-sm h-full">
+   753→                <CardContent className="p-6">
+   754→                  <div className="flex items-center gap-2 mb-6">
+   755→                    <PieChartIcon className="size-5 text-[#00D09C]" />
+   756→                    <h4 className="text-lg font-semibold text-foreground">Asset Allocation</h4>
+   757→                  </div>
+   758→                  {allocationData.length > 0 && allocationTotal > 0 ? (
+   759→                    <div className="flex flex-col items-center gap-8 sm:flex-row">
+   760→                      <div className="relative h-48 w-48 shrink-0">
+   761→                        <ResponsiveContainer width="100%" height="100%">
+   762→                          <PieChart>
+   763→                            <Pie data={allocationData} cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={3} dataKey="value" stroke="none">
+   764→                              {allocationData.map((entry, index) => (
+   765→                                <Cell key={`cell-${index}`} fill={entry.color} />
+   766→                              ))}
+   767→                            </Pie>
+   768→                            <Tooltip
+   769→                              formatter={(value: number) => formatINR(value)}
+   770→                              contentStyle={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)', borderRadius: '10px', fontSize: '12px', color: 'var(--foreground)', boxShadow: '0 4px 12px rgba(0,0,0,0.08)' }}
+   771→                              itemStyle={{ color: 'var(--foreground)' }}
+   772→                              labelStyle={{ color: 'var(--muted-foreground)' }}
+   773→                            />
+   774→                          </PieChart>
+   775→                        </ResponsiveContainer>
+   776→                        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+   777→                          <span className="text-xl font-bold leading-none text-foreground">
+   778→                            {investedAmount > 0 && totalValue > 0 ? Math.round((investedAmount / totalValue) * 100) : 0}%
+   779→                          </span>
+   780→                          <span className="text-[10px] uppercase text-muted-foreground">Invested</span>
+   781→                        </div>
+   782→                      </div>
+   783→                      <div className="flex w-full flex-col gap-4">
+   784→                        {allocationData.map((item) => {
+   785→                          const percent = ((item.value / allocationTotal) * 100).toFixed(1)
+   786→                          return (
+   787→                            <div key={item.name} className="flex items-center justify-between">
+   788→                              <div className="flex items-center gap-2">
+   789→                                <span className="size-3 rounded-full" style={{ backgroundColor: item.color }} />
+   790→                                <span className="text-xs font-semibold text-foreground">{item.name}</span>
+   791→                              </div>
+   792→                              <div className="flex items-center gap-2">
+   793→                                <span className="font-mono-data font-tabular text-sm text-foreground">{formatINRWhole(item.value)}</span>
+   794→                                <Badge variant="outline" className="border-border text-[10px] text-muted-foreground">{percent}%</Badge>
+   795→                              </div>
+   796→                            </div>
+   797→                          )
+   798→                        })}
+   799→                        <div className="mt-2">
+   800→                          <div className="flex h-3 w-full overflow-hidden rounded-full bg-muted">
+   801→                            {allocationData.map((item) => {
+   802→                              const width = (item.value / allocationTotal) * 100
+   803→                              return <div key={item.name} className="h-full transition-all duration-700" style={{ width: `${width}%`, backgroundColor: item.color }} />
+   804→                            })}
+   805→                          </div>
+   806→                        </div>
+   807→                      </div>
+   808→                    </div>
+   809→                  ) : (
+   810→                    <div className="flex flex-col items-center justify-center py-12 text-center">
+   811→                      <div className="size-14 rounded-full bg-background flex items-center justify-center mb-4">
+   812→                        <PieChartIcon className="size-7 text-muted-foreground/40" />
+   813→                      </div>
+   814→                      <p className="text-sm text-muted-foreground">No allocation data yet</p>
+   815→                      <p className="text-xs text-muted-foreground/60 mt-1">Start trading to see your portfolio allocation</p>
+   816→                    </div>
+   817→                  )}
+   818→                </CardContent>
+   819→              </Card>
+   820→            </motion.div>
+   821→
+   822→            <motion.div
+   823→              initial={{ opacity: 0, y: 20 }}
+   824→              animate={{ opacity: 1, y: 0 }}
+   825→              transition={{ delay: 0.6, duration: 0.5, ease: [0.34, 1.56, 0.64, 1] }}
+   826→            >
+   827→              <Card className="bg-card border border-border rounded-xl shadow-sm h-full border-l-4 border-l-[#00D09C]">
+   828→                <CardContent className="p-6">
+   829→                  <h4 className="mb-5 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Account Details</h4>
+   830→                  <div className="flex flex-col gap-4">
+   831→                    <div className="flex items-center justify-between">
+   832→                      <span className="text-xs font-medium text-muted-foreground">Available Balance</span>
+   833→                      <span className="font-mono-data font-tabular text-sm font-semibold text-foreground">{formatINR(portfolio?.virtualBalance ?? 100000)}</span>
+   834→                    </div>
+   835→                    <div className="flex items-center justify-between">
+   836→                      <span className="text-xs font-medium text-muted-foreground">Margin Used</span>
+   837→                      <span className="font-mono-data font-tabular text-sm font-semibold text-foreground">{formatINR(portfolio?.marginUsed ?? 0)}</span>
+   838→                    </div>
+   839→                    <div className="flex items-center justify-between">
+   840→                      <span className="text-xs font-medium text-muted-foreground">Available Margin</span>
+   841→                      <span className="font-mono-data font-tabular text-sm font-semibold text-foreground">{formatINR(portfolio?.availableMargin ?? 100000)}</span>
+   842→                    </div>
+   843→                    <div className="flex items-center justify-between">
+   844→                      <span className="text-xs font-medium text-muted-foreground">Total Trades</span>
+   845→                      <span className="font-mono-data font-tabular text-sm font-semibold text-foreground">{portfolio?.totalTrades ?? 0}</span>
+   846→                    </div>
+   847→                  </div>
+   848→                </CardContent>
+   849→              </Card>
+   850→            </motion.div>
+   851→          </div>
+   852→        </>
+   853→      )}
+   854→    </div>
+   855→  )
+   856→}
+   857→

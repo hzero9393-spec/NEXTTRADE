@@ -1,0 +1,1364 @@
+     1→'use client'
+     2→
+     3→import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
+     4→import { useAuthStore } from '@/lib/auth-store'
+     5→import { useAppStore } from '@/lib/store'
+     6→import { formatINR, formatINRWhole, formatPrice } from '@/lib/format'
+     7→import { useTradeSuccess } from '@/components/pepertect/trade-success-popup'
+     8→import { TradeConfirmModal, TradeConfirmData } from '@/components/pepertect/ui/trade-confirm-modal'
+     9→import { StrikeOverviewDrawer } from '@/components/pepertect/ui/strike-overview-drawer'
+    10→import { X, Minus, Plus, ChevronDown, TrendingUp, TrendingDown, Activity, BarChart3, Zap, ArrowUpDown, Target } from 'lucide-react'
+    11→import { MarketDataSocket } from '@/hooks/use-market-data'
+    12→import type { WsOptionChainUpdate } from '@/hooks/use-market-data'
+    13→
+    14→// ─── Types ──────────────────────────────────────────────────────────────────
+    15→
+    16→interface OCStrike {
+    17→  strike_price: number
+    18→  underlying_spot_price: number
+    19→  call_options: {
+    20→    instrument_key: string
+    21→    market_data: {
+    22→      ltp: number; volume: number; oi: number; close_price: number
+    23→      bid_price: number; bid_qty: number; ask_price: number; ask_qty: number; prev_oi: number
+    24→    }
+    25→    option_greeks: { iv: number; delta: number; theta: number; vega: number; gamma: number; pop: number }
+    26→  }
+    27→  put_options: {
+    28→    instrument_key: string
+    29→    market_data: {
+    30→      ltp: number; volume: number; oi: number; close_price: number
+    31→      bid_price: number; bid_qty: number; ask_price: number; ask_qty: number; prev_oi: number
+    32→    }
+    33→    option_greeks: { iv: number; delta: number; theta: number; vega: number; gamma: number; pop: number }
+    34→  }
+    35→}
+    36→
+    37→interface OCUpdate {
+    38→  underlying: string
+    39→  spot: number
+    40→  pcr: number
+    41→  expiry: string
+    42→  strikes: OCStrike[]
+    43→  timestamp: number
+    44→  totalCallOI: number
+    45→  totalPutOI: number
+    46→  maxPainStrike: number
+    47→}
+    48→
+    49→type Underlying = 'NIFTY' | 'BANKNIFTY' | 'FINNIFTY' | 'SENSEX'
+    50→type ViewMode = 'LTP' | 'OI'
+    51→
+    52→const INDICES: { key: Underlying; label: string; lotSize: number }[] = [
+    53→  { key: 'NIFTY', label: 'NIFTY 50', lotSize: 65 },
+    54→  { key: 'BANKNIFTY', label: 'BANKNIFTY', lotSize: 30 },
+    55→  { key: 'FINNIFTY', label: 'FINNIFTY', lotSize: 60 },
+    56→  { key: 'SENSEX', label: 'SENSEX', lotSize: 15 },
+    57→]
+    58→
+    59→// ─── Helpers ────────────────────────────────────────────────────────────────
+    60→
+    61→function fmtExpiry(d: string) {
+    62→  const dt = new Date(d + 'T00:00:00+05:30')
+    63→  return dt.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })
+    64→}
+    65→
+    66→function fmtOI(n: number): string {
+    67→  if (n >= 10000000) return (n / 10000000).toFixed(2) + 'Cr'
+    68→  if (n >= 100000) return (n / 100000).toFixed(2) + 'L'
+    69→  if (n >= 1000) return (n / 1000).toFixed(1) + 'K'
+    70→  return String(n)
+    71→}
+    72→
+    73→function fmtLtp(n: number): string {
+    74→  if (n <= 0) return '-'
+    75→  if (n < 10) return n.toFixed(2)
+    76→  return n.toFixed(1)
+    77→}
+    78→
+    79→function fmtChg(ltp: number, close: number): { text: string; up: boolean | null } {
+    80→  if (ltp <= 0 || close <= 0) return { text: '-', up: null }
+    81→  const chg = ltp - close
+    82→  const pct = (chg / close) * 100
+    83→  const sign = chg >= 0 ? '+' : ''
+    84→  return { text: `${sign}${pct.toFixed(1)}%`, up: chg >= 0 }
+    85→}
+    86→
+    87→function fmtSpread(ce: number, pe: number): number {
+    88→  return Math.abs(ce - pe)
+    89→}
+    90→
+    91→// ─── Trade Panel State ─────────────────────────────────────────────────────
+    92→
+    93→interface TradeState {
+    94→  open: boolean
+    95→  side: 'BUY' | 'SELL'
+    96→  optionType: 'CE' | 'PE'
+    97→  strike: number
+    98→  ltp: number
+    99→  lots: number
+   100→  orderType: 'MARKET' | 'LIMIT'
+   101→  productType: 'INTRADAY' | 'DELIVERY'
+   102→  limitPrice: string
+   103→  stopLoss: string
+   104→  target: string
+   105→}
+   106→
+   107→const defaultTrade: TradeState = {
+   108→  open: false, side: 'BUY', optionType: 'CE', strike: 0, ltp: 0,
+   109→  lots: 1, orderType: 'MARKET', productType: 'INTRADAY', limitPrice: '',
+   110→  stopLoss: '', target: '',
+   111→}
+   112→
+   113→// ─── Professional Color System ──────────────────────────────────────────────
+   114→
+   115→const C = {
+   116→  bg: '#0a0e17',
+   117→  surface: '#111827',
+   118→  surfaceAlt: '#1a2236',
+   119→  surfaceHover: '#1e2a42',
+   120→  cardBg: '#151d2e',
+   121→  text: '#e8eaed',
+   122→  textSec: '#9aa5b4',
+   123→  textMuted: '#6b7a8d',
+   124→  border: '#1e293b',
+   125→  borderLight: '#1a2332',
+   126→  borderAccent: '#2a3650',
+   127→  green: '#22c55e',
+   128→  greenBright: '#4ade80',
+   129→  greenBg: 'rgba(34,197,94,0.08)',
+   130→  greenBgStrong: 'rgba(34,197,94,0.15)',
+   131→  red: '#ef4444',
+   132→  redBright: '#f87171',
+   133→  redBg: 'rgba(239,68,68,0.08)',
+   134→  redBgStrong: 'rgba(239,68,68,0.15)',
+   135→  primary: '#00D09C',
+   136→  primaryBg: 'rgba(0,208,156,0.1)',
+   137→  primaryDim: 'rgba(0,208,156,0.06)',
+   138→  atmBg: 'rgba(0,208,156,0.07)',
+   139→  atmBorder: 'rgba(0,208,156,0.3)',
+   140→  headerBg: '#0d1320',
+   141→  spotBadge: '#1e3a5f',
+   142→  spotBadgeBorder: '#2563eb',
+   143→  greenDim: 'rgba(34,197,94,0.03)',
+   144→  redDim: 'rgba(239,68,68,0.03)',
+   145→  gold: '#fbbf24',
+   146→  blue: '#3b82f6',
+   147→  purple: '#a78bfa',
+   148→}
+   149→
+   150→// ─── Main Component ─────────────────────────────────────────────────────────
+   151→
+   152→export function OptionChainPage() {
+   153→  const [index, setIndex] = useState<Underlying>('NIFTY')
+   154→  const [expiries, setExpiries] = useState<string[]>([])
+   155→  const [expiry, setExpiry] = useState('')
+   156→  const [data, setData] = useState<OCUpdate | null>(null)
+   157→  const [live, setLive] = useState(false)
+   158→  const [loading, setLoading] = useState(true)
+   159→  const [ocError, setOcError] = useState<'upstox_token' | 'timeout' | null>(null)
+   160→  const [viewMode, setViewMode] = useState<ViewMode>('LTP')
+   161→  const tableBodyRef = useRef<HTMLDivElement>(null)
+   162→  const scrollTargetRef = useRef<string>('')
+   163→
+   164→  const [trade, setTrade] = useState<TradeState>(defaultTrade)
+   165→  const [confirmOpen, setConfirmOpen] = useState(false)
+   166→  const [confirmData, setConfirmData] = useState<TradeConfirmData | null>(null)
+   167→
+   168→  // Strike overview state
+   169→  const [strikeOverview, setStrikeOverview] = useState<{
+   170→    underlying: string
+   171→    strike: number
+   172→    optionType: 'CE' | 'PE'
+   173→    instrumentKey: string
+   174→  } | null>(null)
+   175→
+   176→  const token = useAuthStore(s => s.token)
+   177→  const userData = useAuthStore(s => s.user)
+   178→  const setUser = useAuthStore(s => s.setUser)
+   179→  const bumpTradeSignal = useAppStore(s => s.bumpTradeSignal)
+   180→  const { showTradeSuccess } = useTradeSuccess()
+   181→
+   182→  const lotSize = INDICES.find(i => i.key === index)?.lotSize || 50
+   183→  const availableMargin = userData ? (userData.virtualBalance - (userData.marginUsed || 0)) : 0
+   184→
+   185→  // Fetch expiries
+   186→  useEffect(() => {
+   187→    let cancelled = false
+   188→    setLoading(true)
+   189→    setData(null)
+   190→    setExpiry('')
+   191→
+   192→    fetch(`/api/options/expiries/${index}`)
+   193→      .then(r => r.json())
+   194→      .then(json => {
+   195→        if (cancelled) return
+   196→        const all: string[] = json?.data?.expiries || []
+   197→        const today = new Date().toISOString().split('T')[0]
+   198→        const upcoming = all.filter(e => e >= today)
+   199→        const list = upcoming.slice(0, 4)
+   200→        setExpiries(list)
+   201→        if (list.length > 0) setExpiry(list[0])
+   202→      })
+   203→      .catch(() => {})
+   204→      .finally(() => { if (!cancelled) setLoading(false) })
+   205→
+   206→    return () => { cancelled = true }
+   207→  }, [index])
+   208→
+   209→  // Option chain via WebSocket
+   210→  useEffect(() => {
+   211→    if (!expiry) return
+   212→
+   213→    // Reset data for clean state on expiry/index change
+   214→    setData(null)
+   215→    setLive(false)
+   216→
+   217→    const manager = MarketDataSocket.getInstance()
+   218→    manager.connect()
+   219→
+   220→    // Subscribe to options channel via WS
+   221→    manager.subscribeOptionChain(index, expiry)
+   222→
+   223→    // Listen for updates
+   224→    const unsub = manager.onOptionChainUpdate(index, (update: WsOptionChainUpdate) => {
+   225→      if (update.underlying !== index) return
+   226→      if (expiry && update.expiry !== expiry) return
+   227→
+   228→      // Transform WS format to component format
+   229→      const transformedStrikes = update.chain.map(s => ({
+   230→        strike_price: s.strikePrice,
+   231→        underlying_spot_price: update.spot,
+   232→        call_options: {
+   233→          instrument_key: '',
+   234→          market_data: {
+   235→            ltp: s.ce?.ltp ?? 0,
+   236→            volume: s.ce?.volume ?? 0,
+   237→            oi: s.ce?.oi ?? 0,
+   238→            close_price: (s.ce?.ltp ?? 0) - (s.ce?.change ?? 0),
+   239→            bid_price: s.ce?.bidPrice ?? 0,
+   240→            bid_qty: 0,
+   241→            ask_price: s.ce?.askPrice ?? 0,
+   242→            ask_qty: 0,
+   243→            prev_oi: (s.ce?.oi ?? 0) - (s.ce?.oiChange ?? 0),
+   244→          },
+   245→          option_greeks: {
+   246→            iv: s.ce?.iv ?? 0,
+   247→            delta: s.ce?.delta ?? 0,
+   248→            theta: 0, vega: 0, gamma: 0, pop: 0,
+   249→          },
+   250→        },
+   251→        put_options: {
+   252→          instrument_key: '',
+   253→          market_data: {
+   254→            ltp: s.pe?.ltp ?? 0,
+   255→            volume: s.pe?.volume ?? 0,
+   256→            oi: s.pe?.oi ?? 0,
+   257→            close_price: (s.pe?.ltp ?? 0) - (s.pe?.change ?? 0),
+   258→            bid_price: s.pe?.bidPrice ?? 0,
+   259→            bid_qty: 0,
+   260→            ask_price: s.pe?.askPrice ?? 0,
+   261→            ask_qty: 0,
+   262→            prev_oi: (s.pe?.oi ?? 0) - (s.pe?.oiChange ?? 0),
+   263→          },
+   264→          option_greeks: {
+   265→            iv: s.pe?.iv ?? 0,
+   266→            delta: s.pe?.delta ?? 0,
+   267→            theta: 0, vega: 0, gamma: 0, pop: 0,
+   268→          },
+   269→        },
+   270→      }))
+   271→
+   272→      setData({
+   273→        underlying: update.underlying,
+   274→        spot: update.spot,
+   275→        pcr: update.pcr,
+   276→        expiry: update.expiry,
+   277→        strikes: transformedStrikes,
+   278→        timestamp: update.timestamp,
+   279→        totalCallOI: 0,
+   280→        totalPutOI: 0,
+   281→        maxPainStrike: update.maxPain,
+   282→      } as any)
+   283→      setOcError(null)
+   284→      setLoading(false)
+   285→      setLive(true)
+   286→    })
+   287→
+   288→    // Keep the initial REST fetch as fallback (one-time, no interval)
+   289→    setLoading(true)
+   290→    fetch(`/api/options/chain?underlying=${index}&expiry=${expiry}`)
+   291→      .then(res => res.json())
+   292→      .then(json => {
+   293→        if (json?.success && json?.data?.strikes?.length > 0) {
+   294→          setData(json.data)
+   295→          setOcError(null)
+   296→        }
+   297→      })
+   298→      .catch(() => {})
+   299→      .finally(() => setLoading(false))
+   300→
+   301→    return () => {
+   302→      unsub()
+   303→      manager.unsubscribeOptionChain(index, expiry)
+   304→      setLive(false)
+   305→    }
+   306→  }, [index, expiry])
+   307→
+   308→  // Auto-scroll to ATM strike when data loads (fires on every index/expiry change)
+   309→  useEffect(() => {
+   310→    if (!data || !tableBodyRef.current) return
+   311→    const targetKey = `${index}-${expiry}-${data.spot}`
+   312→    if (scrollTargetRef.current === targetKey) return
+   313→    scrollTargetRef.current = targetKey
+   314→
+   315→    requestAnimationFrame(() => {
+   316→      const el = tableBodyRef.current?.querySelector('[data-atm="true"]') as HTMLElement | null
+   317→      if (el) {
+   318→        const container = tableBodyRef.current!
+   319→        const containerRect = container.getBoundingClientRect()
+   320→        const elRect = el.getBoundingClientRect()
+   321→        const scrollOffset = el.offsetTop - container.offsetTop - (containerRect.height / 2) + (elRect.height / 2)
+   322→        container.scrollTo({ top: Math.max(0, scrollOffset), behavior: 'smooth' })
+   323→      }
+   324→    })
+   325→  }, [data?.strikes?.length, index, expiry])
+   326→
+   327→  // Filter strikes around spot
+   328→  const strikes = useMemo(() => {
+   329→    if (!data?.strikes?.length) return []
+   330→    return data.strikes.filter(s => Math.abs(s.strike_price - data.spot) <= 2000)
+   331→  }, [data?.strikes, data?.spot])
+   332→
+   333→  // ATM strike
+   334→  const atm = useMemo(() => {
+   335→    if (!data?.strikes?.length || !data.spot) return 0
+   336→    let best = data.strikes[0].strike_price
+   337→    let minD = Math.abs(best - data.spot)
+   338→    for (const s of data.strikes) {
+   339→      const d = Math.abs(s.strike_price - data.spot)
+   340→      if (d < minD) { minD = d; best = s.strike_price }
+   341→    }
+   342→    return best
+   343→  }, [data?.strikes, data?.spot])
+   344→
+   345→  // Spot change
+   346→  const spotChange = useMemo(() => {
+   347→    if (!data) return null
+   348→    const first = strikes[0]
+   349→    if (!first?.call_options?.market_data) return null
+   350→    return data.spot - first.call_options.market_data.close_price
+   351→  }, [data, strikes])
+   352→
+   353→  // Max OI for bar calculation
+   354→  const maxOI = useMemo(() => {
+   355→    let m = 0
+   356→    for (const s of strikes) {
+   357→      const ceOI = s.call_options?.market_data?.oi || 0
+   358→      const peOI = s.put_options?.market_data?.oi || 0
+   359→      m = Math.max(m, ceOI, peOI)
+   360→    }
+   361→    return m || 1
+   362→  }, [strikes])
+   363→
+   364→  // Spread at ATM
+   365→  const atmSpread = useMemo(() => {
+   366→    if (!data) return 0
+   367→    const atmStrike = data.strikes.find(s => s.strike_price === atm)
+   368→    if (!atmStrike) return 0
+   369→    const ceLtp = atmStrike.call_options?.market_data?.ltp || 0
+   370→    const peLtp = atmStrike.put_options?.market_data?.ltp || 0
+   371→    return ceLtp + peLtp
+   372→  }, [data, atm])
+   373→
+   374→  // ── Trade Logic ──
+   375→
+   376→  const openTrade = useCallback((optionType: 'CE' | 'PE', strike: number, ltp: number, side: 'BUY' | 'SELL') => {
+   377→    setTrade({
+   378→      ...defaultTrade,
+   379→      open: true,
+   380→      side,
+   381→      optionType,
+   382→      strike,
+   383→      ltp: ltp > 0 ? ltp : 0,
+   384→    })
+   385→  }, [])
+   386→
+   387→  const totalQty = trade.lots * lotSize
+   388→  const fillPrice = trade.orderType === 'LIMIT' && trade.limitPrice
+   389→    ? parseFloat(trade.limitPrice) || 0
+   390→    : trade.ltp
+   391→  const totalValue = totalQty * fillPrice
+   392→  const brokerage = totalValue > 0 ? Math.max(20, Math.min(500, totalValue * 0.0005)) : 0
+   393→
+   394→  const handleConfirm = useCallback(async () => {
+   395→    if (!token || fillPrice <= 0) return
+   396→
+   397→    // Refresh user data to get latest marginUsed before showing confirm
+   398→    let freshAvailable = availableMargin
+   399→    try {
+   400→      const meRes = await fetch('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } })
+   401→      if (meRes.ok) {
+   402→        const meData = await meRes.json()
+   403→        if (meData.user) {
+   404→          setUser(meData.user)
+   405→          freshAvailable = meData.user.virtualBalance - (meData.user.marginUsed || 0)
+   406→        }
+   407→      }
+   408→    } catch {}
+   409→
+   410→    setConfirmData({
+   411→      symbol: index,
+   412→      direction: trade.side,
+   413→      segment: 'OPTIONS',
+   414→      productType: trade.productType,
+   415→      orderType: trade.orderType,
+   416→      quantity: totalQty,
+   417→      price: fillPrice,
+   418→      totalValue: Math.round(totalValue * 100) / 100,
+   419→      brokerage: Math.round(brokerage * 100) / 100,
+   420→      availableBalance: freshAvailable,
+   421→      optionType: trade.optionType,
+   422→      strikePrice: trade.strike,
+   423→      lots: trade.lots,
+   424→      lotSize,
+   425→      expiryDate: expiry,
+   426→    })
+   427→    setConfirmOpen(true)
+   428→  }, [token, trade, fillPrice, totalQty, totalValue, brokerage, lotSize, index, expiry, availableMargin, setUser])
+   429→
+   430→  const executeTrade = useCallback(async () => {
+   431→    if (!token) return { success: false, error: 'Not logged in' }
+   432→
+   433→    const body: Record<string, unknown> = {
+   434→      symbol: index,
+   435→      direction: trade.side,
+   436→      orderType: trade.orderType,
+   437→      segment: 'OPTIONS',
+   438→      productType: trade.productType,
+   439→      quantity: totalQty,
+   440→      optionType: trade.optionType,
+   441→      strikePrice: trade.strike,
+   442→      lots: trade.lots,
+   443→      lotSize,
+   444→      expiryDate: expiry,
+   445→      ltp: trade.ltp,
+   446→    }
+   447→
+   448→    if (trade.orderType === 'LIMIT' && trade.limitPrice) {
+   449→      body.price = parseFloat(trade.limitPrice)
+   450→    }
+   451→
+   452→    // Pass SL/Target to backend
+   453→    if (trade.stopLoss) body.stopLoss = parseFloat(trade.stopLoss)
+   454→    if (trade.target) body.target = parseFloat(trade.target)
+   455→
+   456→    try {
+   457→      const res = await fetch('/api/trade/place', {
+   458→        method: 'POST',
+   459→        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+   460→        body: JSON.stringify(body),
+   461→      })
+   462→
+   463→      const resData = await res.json()
+   464→
+   465→      if (res.ok && resData.success) {
+   466→        showTradeSuccess({
+   467→          symbol: `${index} ${trade.strike} ${trade.optionType}`,
+   468→          type: trade.side,
+   469→          qty: totalQty,
+   470→          price: fillPrice,
+   471→          time: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase(),
+   472→          orderId: resData.order?.id?.slice(-8).toUpperCase() || 'N/A',
+   473→          segment: 'OPTIONS',
+   474→          optionType: trade.optionType,
+   475→          strikePrice: trade.strike,
+   476→          totalValue: resData.order?.totalValue,
+   477→          brokerage: resData.order?.brokerage,
+   478→        })
+   479→        bumpTradeSignal()
+   480→        if (resData.balance !== undefined && userData) {
+   481→          setUser({ ...userData, virtualBalance: resData.balance, totalPnl: resData.totalPnl ?? userData.totalPnl })
+   482→          fetch('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } })
+   483→            .then(r => r.ok ? r.json() : null)
+   484→            .then(d => { if (d?.user) setUser(d.user) })
+   485→            .catch(() => {})
+   486→        }
+   487→        if ((trade.stopLoss || trade.target) && token && resData.order?.id) {
+   488→          const slBody: Record<string, unknown> = { stopLoss: null, target: null }
+   489→          if (trade.stopLoss) slBody.stopLoss = parseFloat(trade.stopLoss)
+   490→          if (trade.target) slBody.target = parseFloat(trade.target)
+   491→          fetch('/api/trade/sl-set', {
+   492→            method: 'POST',
+   493→            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+   494→            body: JSON.stringify({ positionId: resData.positionId, ...slBody }),
+   495→          }).catch(() => {})
+   496→        }
+   497→        setTrade(defaultTrade)
+   498→        return { success: true }
+   499→      } else {
+   500→        return { success: false, error: resData.error || 'Trade failed' }
+   501→      }
+   502→    } catch {
+   503→      return { success: false, error: 'Network error' }
+   504→    }
+   505→  }, [token, trade, fillPrice, totalQty, lotSize, index, expiry, showTradeSuccess, userData, setUser])
+   506→
+   507→  const isLTP = viewMode === 'LTP'
+   508→
+   509→  // ── Column definitions for grid ──
+   510→  // LTP mode:  CE_LTP | CE_CHG | STRIKE | SPREAD | PE_CHG | PE_LTP
+   511→  // OI mode:   CE_OI  | CE_OICHG | STRIKE | SPREAD | PE_OICHG | PE_OI
+   512→
+   513→  return (
+   514→    <div className="flex flex-col" style={{ height: 'calc(100vh - 92px)', background: C.bg }}>
+   515→
+   516→      {/* ═══ INDEX TABS ═══ */}
+   517→      <div className="shrink-0" style={{ background: C.headerBg, borderBottom: `1px solid ${C.border}` }}>
+   518→        <div className="flex items-center px-3 pt-2 pb-0 gap-1">
+   519→          {INDICES.map(ind => (
+   520→            <button
+   521→              key={ind.key}
+   522→              onClick={() => setIndex(ind.key)}
+   523→              className="relative px-4 py-2.5 text-[12px] font-semibold tracking-wide transition-all duration-200 rounded-t-lg"
+   524→              style={{
+   525→                color: index === ind.key ? C.primary : C.textMuted,
+   526→                background: index === ind.key ? C.surface : 'transparent',
+   527→              }}
+   528→            >
+   529→              {ind.label}
+   530→              {index === ind.key && (
+   531→                <span
+   532→                  className="absolute bottom-0 left-2 right-2 h-[2.5px] rounded-t-full"
+   533→                  style={{ background: `linear-gradient(90deg, ${C.primary}, ${C.greenBright})` }}
+   534→                />
+   535→              )}
+   536→            </button>
+   537→          ))}
+   538→          <div className="ml-auto pr-1 flex items-center gap-2">
+   539→            {live && (
+   540→              <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold tracking-wider" style={{ background: C.primaryBg, color: C.primary }}>
+   541→                <span className="w-1.5 h-1.5 rounded-full animate-live-pulse" style={{ background: C.primary, boxShadow: `0 0 6px ${C.primary}` }} />
+   542→                LIVE
+   543→              </span>
+   544→            )}
+   545→          </div>
+   546→        </div>
+   547→      </div>
+   548→
+   549→      {/* ═══ MARKET INFO BAR ═══ */}
+   550→      {data && (
+   551→        <div
+   552→          className="shrink-0 px-3 py-2 flex items-center gap-2 overflow-x-auto no-scrollbar"
+   553→          style={{ background: C.surface, borderBottom: `1px solid ${C.border}` }}
+   554→        >
+   555→          {/* Spot Price */}
+   556→          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg" style={{ background: C.surfaceAlt }}>
+   557→            <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: C.textMuted }}>Spot</span>
+   558→            <span className="text-[14px] font-bold" style={{ color: C.text, fontVariantNumeric: 'tabular-nums' }}>
+   559→              {formatPrice(data.spot)}
+   560→            </span>
+   561→            {spotChange !== null && spotChange !== 0 && (
+   562→              <span className="flex items-center gap-0.5 text-[11px] font-semibold px-1.5 py-0.5 rounded" style={{ color: spotChange > 0 ? C.green : C.red, background: spotChange > 0 ? C.greenBg : C.redBg }}>
+   563→                {spotChange > 0 ? <TrendingUp className="size-3" /> : <TrendingDown className="size-3" />}
+   564→                {spotChange > 0 ? '+' : ''}{formatPrice(Math.abs(spotChange))}
+   565→              </span>
+   566→            )}
+   567→          </div>
+   568→
+   569→          {/* PCR */}
+   570→          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg" style={{ background: C.surfaceAlt }}>
+   571→            <Activity className="size-3.5" style={{ color: C.textMuted }} />
+   572→            <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: C.textMuted }}>PCR</span>
+   573→            <span className="text-[12px] font-bold" style={{ color: data.pcr > 1 ? C.green : data.pcr < 0.8 ? C.red : C.text, fontVariantNumeric: 'tabular-nums' }}>
+   574→              {data.pcr > 0 ? data.pcr.toFixed(2) : '-'}
+   575→            </span>
+   576→          </div>
+   577→
+   578→          {/* Max Pain */}
+   579→          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg" style={{ background: C.surfaceAlt }}>
+   580→            <Target className="size-3.5" style={{ color: C.gold }} />
+   581→            <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: C.textMuted }}>Max Pain</span>
+   582→            <span className="text-[12px] font-bold" style={{ color: C.gold, fontVariantNumeric: 'tabular-nums' }}>
+   583→              {data.maxPainStrike > 0 ? formatINRWhole(data.maxPainStrike) : '-'}
+   584→            </span>
+   585→          </div>
+   586→
+   587→          {/* ATM Straddle */}
+   588→          {atmSpread > 0 && (
+   589→            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg" style={{ background: C.surfaceAlt }}>
+   590→              <ArrowUpDown className="size-3.5" style={{ color: C.purple }} />
+   591→              <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: C.textMuted }}>Straddle</span>
+   592→              <span className="text-[12px] font-bold" style={{ color: C.purple, fontVariantNumeric: 'tabular-nums' }}>
+   593→                {atmSpread.toFixed(1)}
+   594→              </span>
+   595→            </div>
+   596→          )}
+   597→
+   598→          {/* Lot Size */}
+   599→          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg ml-auto" style={{ background: C.surfaceAlt }}>
+   600→            <BarChart3 className="size-3.5" style={{ color: C.textMuted }} />
+   601→            <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: C.textMuted }}>Lot</span>
+   602→            <span className="text-[12px] font-bold" style={{ color: C.text }}>{lotSize}</span>
+   603→          </div>
+   604→        </div>
+   605→      )}
+   606→
+   607→      {/* ═══ EXPIRY BAR + VIEW TOGGLE ═══ */}
+   608→      <div className="shrink-0 flex items-center" style={{ background: C.surface, borderBottom: `1px solid ${C.border}` }}>
+   609→        <div className="flex items-center overflow-x-auto no-scrollbar px-3 py-1.5 gap-1">
+   610→          <span className="text-[10px] font-semibold uppercase tracking-wider mr-1" style={{ color: C.textMuted }}>Expiry</span>
+   611→          {expiries.map(e => (
+   612→            <button
+   613→              key={e}
+   614→              onClick={() => setExpiry(e)}
+   615→              className="px-3 py-1.5 text-[11px] font-semibold rounded-md transition-all duration-200 whitespace-nowrap"
+   616→              style={{
+   617→                color: expiry === e ? C.text : C.textMuted,
+   618→                background: expiry === e ? C.primaryBg : 'transparent',
+   619→                border: expiry === e ? `1px solid rgba(0,208,156,0.3)` : '1px solid transparent',
+   620→              }}
+   621→            >
+   622→              {fmtExpiry(e)}
+   623→            </button>
+   624→          ))}
+   625→        </div>
+   626→        <div className="ml-auto pr-3 shrink-0">
+   627→          <div className="inline-flex rounded-lg overflow-hidden" style={{ border: `1px solid ${C.border}` }}>
+   628→            {(['LTP', 'OI'] as ViewMode[]).map((mode, i) => (
+   629→              <button
+   630→                key={mode}
+   631→                onClick={() => setViewMode(mode)}
+   632→                className="px-3.5 py-1.5 text-[10px] font-bold tracking-wider transition-all duration-200"
+   633→                style={{
+   634→                  background: viewMode === mode ? C.primary : 'transparent',
+   635→                  color: viewMode === mode ? '#fff' : C.textMuted,
+   636→                  borderRight: i === 0 ? `1px solid ${C.border}` : 'none',
+   637→                }}
+   638→              >
+   639→                {mode}
+   640→              </button>
+   641→            ))}
+   642→          </div>
+   643→        </div>
+   644→      </div>
+   645→
+   646→      {/* ═══ OPTION CHAIN TABLE ═══ */}
+   647→      <div className="flex-1 min-h-0 flex flex-col overflow-hidden px-1 pt-1 pb-1">
+   648→
+   649→        {loading ? (
+   650→          <div className="flex-1 flex items-center justify-center">
+   651→            <div className="flex flex-col items-center gap-3">
+   652→              <div className="w-8 h-8 border-2 rounded-full animate-spin" style={{ borderColor: C.border, borderTopColor: C.primary }} />
+   653→              <span className="text-[12px] font-medium" style={{ color: C.textMuted }}>Loading option chain...</span>
+   654→            </div>
+   655→          </div>
+   656→        ) : strikes.length > 0 ? (
+   657→          <div className="flex-1 min-h-0 flex flex-col rounded-xl overflow-hidden" style={{ border: `1px solid ${C.border}`, background: C.surface }}>
+   658→
+   659→            {/* ── Sticky Header ── */}
+   660→            <div className="shrink-0 sticky top-0 z-10" style={{ background: C.headerBg, borderBottom: `2px solid ${C.border}` }}>
+   661→              {isLTP ? (
+   662→                <>
+   663→                  {/* Top header row: CE label | columns | PE label */}
+   664→                  <div
+   665→                    className="grid items-center text-[10px] font-bold uppercase tracking-wider"
+   666→                    style={{
+   667→                      gridTemplateColumns: '1fr 48px 68px 64px 48px 1fr',
+   668→                      color: C.textMuted,
+   669→                    }}
+   670→                  >
+   671→                    <div className="flex items-center justify-end gap-2 pr-3 border-r" style={{ borderColor: C.border }}>
+   672→                      <span style={{ color: C.green }}>CE</span>
+   673→                      <span>LTP</span>
+   674→                    </div>
+   675→                    <div className="flex items-center justify-center border-r" style={{ borderColor: C.border }}>
+   676→                      Chg
+   677→                    </div>
+   678→                    <div className="flex items-center justify-center border-r" style={{ borderColor: C.border }}>
+   679→                      <span style={{ color: C.text }}>STRIKE</span>
+   680→                    </div>
+   681→                    <div className="flex items-center justify-center border-r" style={{ borderColor: C.border }}>
+   682→                      <span style={{ color: C.gold }}>SPREAD</span>
+   683→                    </div>
+   684→                    <div className="flex items-center justify-center border-r" style={{ borderColor: C.border }}>
+   685→                      Chg
+   686→                    </div>
+   687→                    <div className="flex items-center pl-3 gap-2">
+   688→                      <span>LTP</span>
+   689→                      <span style={{ color: C.red }}>PE</span>
+   690→                    </div>
+   691→                  </div>
+   692→                  {/* Sub-header with OI hint */}
+   693→                  <div
+   694→                    className="grid items-center text-[9px] font-semibold"
+   695→                    style={{
+   696→                      gridTemplateColumns: '1fr 48px 68px 64px 48px 1fr',
+   697→                      borderBottom: `1px solid ${C.border}`,
+   698→                    }}
+   699→                  >
+   700→                    <div className="flex items-center justify-end pr-3 border-r py-1" style={{ borderColor: C.border, color: C.green, background: C.greenDim, opacity: 0.6 }}>
+   701→                      OI →
+   702→                    </div>
+   703→                    <div className="border-r" style={{ borderColor: C.border }} />
+   704→                    <div className="border-r" style={{ borderColor: C.border }} />
+   705→                    <div className="border-r" style={{ borderColor: C.border }} />
+   706→                    <div className="border-r" style={{ borderColor: C.border }} />
+   707→                    <div className="flex items-center pl-3 py-1" style={{ color: C.red, background: C.redDim, opacity: 0.6 }}>
+   708→                      ← OI
+   709→                    </div>
+   710→                  </div>
+   711→                </>
+   712→              ) : (
+   713→                <div
+   714→                  className="grid items-center text-[10px] font-bold uppercase tracking-wider"
+   715→                  style={{
+   716→                    gridTemplateColumns: '1fr 48px 68px 64px 48px 1fr',
+   717→                    color: C.textMuted,
+   718→                  }}
+   719→                >
+   720→                  <div className="flex items-center justify-end gap-2 pr-3 border-r" style={{ borderColor: C.border }}>
+   721→                    <span style={{ color: C.green }}>CE</span>
+   722→                    <span>OI</span>
+   723→                  </div>
+   724→                  <div className="flex items-center justify-center border-r" style={{ borderColor: C.border }}>
+   725→                    Chg
+   726→                  </div>
+   727→                  <div className="flex items-center justify-center border-r" style={{ borderColor: C.border }}>
+   728→                    <span style={{ color: C.text }}>STRIKE</span>
+   729→                  </div>
+   730→                  <div className="flex items-center justify-center border-r" style={{ borderColor: C.border }}>
+   731→                    <span style={{ color: C.gold }}>SPREAD</span>
+   732→                  </div>
+   733→                  <div className="flex items-center justify-center border-r" style={{ borderColor: C.border }}>
+   734→                    Chg
+   735→                  </div>
+   736→                  <div className="flex items-center pl-3 gap-2">
+   737→                    <span>OI</span>
+   738→                    <span style={{ color: C.red }}>PE</span>
+   739→                  </div>
+   740→                </div>
+   741→              )}
+   742→            </div>
+   743→
+   744→            {/* ── Scrollable Body ── */}
+   745→            <div ref={tableBodyRef} className="flex-1 overflow-y-auto custom-scrollbar">
+   746→              {strikes.map((s, idx) => {
+   747→                const ce = s.call_options?.market_data
+   748→                const pe = s.put_options?.market_data
+   749→                const isATM = s.strike_price === atm
+   750→                const ceITM = s.strike_price < data!.spot
+   751→                const peITM = s.strike_price > data!.spot
+   752→                const showSpotBadge = idx > 0 && s.strike_price >= data!.spot && strikes[idx - 1].strike_price < data!.spot
+   753→                const straddle = isATM && ce && pe ? ce.ltp + pe.ltp : 0
+   754→                const spread = (ce && pe) ? fmtSpread(ce.ltp, pe.ltp) : 0
+   755→
+   756→                // OI bar widths (percentage of max OI)
+   757→                const ceOIWidth = maxOI > 0 ? ((ce?.oi || 0) / maxOI) * 100 : 0
+   758→                const peOIWidth = maxOI > 0 ? ((pe?.oi || 0) / maxOI) * 100 : 0
+   759→
+   760→                if (!ce || !pe) return null
+   761→
+   762→                if (isLTP) {
+   763→                  const ceChg = fmtChg(ce.ltp, ce.close_price)
+   764→                  const peChg = fmtChg(pe.ltp, pe.close_price)
+   765→
+   766→                  return (
+   767→                    <React.Fragment key={s.strike_price}>
+   768→                      {/* Spot Price Divider */}
+   769→                      {showSpotBadge && (
+   770→                        <div
+   771→                          data-spot-badge="true"
+   772→                          className="grid items-center"
+   773→                          style={{ gridTemplateColumns: '1fr 48px 68px 64px 48px 1fr', height: '28px', borderBottom: `1px solid ${C.border}` }}
+   774→                        >
+   775→                          <div className="border-r" style={{ borderColor: C.border, background: C.greenDim }} />
+   776→                          <div className="border-r" style={{ borderColor: C.border }} />
+   777→                          <div
+   778→                            className="flex items-center justify-center gap-1.5"
+   779→                            style={{ borderRight: `1px solid ${C.border}`, background: C.spotBadge }}
+   780→                          >
+   781→                            <Zap className="size-3" style={{ color: C.blue }} />
+   782→                            <span className="text-[10px] font-bold" style={{ color: C.blue, fontVariantNumeric: 'tabular-nums' }}>
+   783→                              {data!.spot.toFixed(2)}
+   784→                            </span>
+   785→                          </div>
+   786→                          <div className="border-r" style={{ borderColor: C.border }} />
+   787→                          <div className="border-r" style={{ borderColor: C.border }} />
+   788→                          <div style={{ background: C.redDim }} />
+   789→                        </div>
+   790→                      )}
+   791→
+   792→                      {/* Row */}
+   793→                      <div
+   794→                        data-atm={isATM ? 'true' : undefined}
+   795→                        className="grid items-center transition-all duration-100 cursor-pointer group relative"
+   796→                        style={{
+   797→                          gridTemplateColumns: '1fr 48px 68px 64px 48px 1fr',
+   798→                          height: isATM ? '46px' : '38px',
+   799→                          borderBottom: `1px solid ${isATM ? C.atmBorder : C.borderLight}`,
+   800→                          background: isATM ? C.atmBg : 'transparent',
+   801→                        }}
+   802→                        onMouseEnter={e => { if (!isATM) e.currentTarget.style.background = C.surfaceHover }}
+   803→                        onMouseLeave={e => { if (!isATM) e.currentTarget.style.background = 'transparent' }}
+   804→                        onClick={() => {
+   805→                          if (ce.oi >= pe.oi) openTrade('CE', s.strike_price, ce.ltp, 'BUY')
+   806→                          else openTrade('PE', s.strike_price, pe.ltp, 'BUY')
+   807→                        }}
+   808→                      >
+   809→                        {/* CE LTP */}
+   810→                        <div
+   811→                          className="flex items-center justify-end pr-3 border-r relative overflow-hidden"
+   812→                          style={{ borderColor: C.border, background: ceITM && !isATM ? C.greenBg : 'transparent' }}
+   813→                        >
+   814→                          {/* OI background bar */}
+   815→                          {ceOIWidth > 0 && (
+   816→                            <div
+   817→                              className="absolute right-0 top-0 bottom-0 opacity-20"
+   818→                              style={{
+   819→                                width: `${ceOIWidth}%`,
+   820→                                background: `linear-gradient(270deg, ${C.green} 0%, transparent 100%)`,
+   821→                                transition: 'width 0.3s ease',
+   822→                              }}
+   823→                            />
+   824→                          )}
+   825→                          <span
+   826→                            className="text-[12px] font-bold relative z-10"
+   827→                            style={{ color: C.text, fontVariantNumeric: 'tabular-nums' }}
+   828→                            onClick={(e) => { e.stopPropagation(); setStrikeOverview({ underlying: index, strike: s.strike_price, optionType: 'CE', instrumentKey: s.call_options?.instrument_key || '' }) }}
+   829→                          >
+   830→                            {fmtLtp(ce.ltp)}
+   831→                          </span>
+   832→                        </div>
+   833→
+   834→                        {/* CE Chg */}
+   835→                        <div
+   836→                          className="flex items-center justify-center border-r text-[10px] font-semibold relative z-10"
+   837→                          style={{ borderColor: C.border, color: ceChg.up === true ? C.green : ceChg.up === false ? C.red : C.textMuted, fontVariantNumeric: 'tabular-nums' }}
+   838→                        >
+   839→                          {ceChg.text}
+   840→                        </div>
+   841→
+   842→                        {/* Strike */}
+   843→                        <div
+   844→                          className="flex flex-col items-center justify-center border-r relative z-10"
+   845→                          style={{ borderColor: C.border, background: isATM ? C.primaryBg : 'transparent' }}
+   846→                        >
+   847→                          <span
+   848→                            className="text-[12px] font-extrabold"
+   849→                            style={{ color: isATM ? C.primary : C.text, fontVariantNumeric: 'tabular-nums' }}
+   850→                          >
+   851→                            {formatINRWhole(s.strike_price)}
+   852→                          </span>
+   853→                          {isATM && (
+   854→                            <span className="text-[8px] font-bold mt-px tracking-wider" style={{ color: C.primary }}>
+   855→                              ATM
+   856→                            </span>
+   857→                          )}
+   858→                        </div>
+   859→
+   860→                        {/* Spread */}
+   861→                        <div
+   862→                          className="flex items-center justify-center border-r relative z-10"
+   863→                          style={{ borderColor: C.border, background: isATM ? 'rgba(251,191,36,0.06)' : 'transparent' }}
+   864→                        >
+   865→                          {spread > 0 ? (
+   866→                            <span className="text-[11px] font-bold px-1.5 py-0.5 rounded" style={{ color: C.gold, background: 'rgba(251,191,36,0.1)', fontVariantNumeric: 'tabular-nums' }}>
+   867→                              {spread.toFixed(1)}
+   868→                            </span>
+   869→                          ) : (
+   870→                            <span className="text-[11px]" style={{ color: C.textMuted }}>-</span>
+   871→                          )}
+   872→                        </div>
+   873→
+   874→                        {/* PE Chg */}
+   875→                        <div
+   876→                          className="flex items-center justify-center border-r text-[10px] font-semibold relative z-10"
+   877→                          style={{ borderColor: C.border, color: peChg.up === true ? C.green : peChg.up === false ? C.red : C.textMuted, fontVariantNumeric: 'tabular-nums' }}
+   878→                        >
+   879→                          {peChg.text}
+   880→                        </div>
+   881→
+   882→                        {/* PE LTP */}
+   883→                        <div
+   884→                          className="flex items-center pl-3 relative overflow-hidden"
+   885→                          style={{ background: peITM && !isATM ? C.redBg : 'transparent' }}
+   886→                        >
+   887→                          {/* OI background bar */}
+   888→                          {peOIWidth > 0 && (
+   889→                            <div
+   890→                              className="absolute left-0 top-0 bottom-0 opacity-20"
+   891→                              style={{
+   892→                                width: `${peOIWidth}%`,
+   893→                                background: `linear-gradient(90deg, ${C.red} 0%, transparent 100%)`,
+   894→                                transition: 'width 0.3s ease',
+   895→                              }}
+   896→                            />
+   897→                          )}
+   898→                          <span
+   899→                            className="text-[12px] font-bold relative z-10"
+   900→                            style={{ color: C.text, fontVariantNumeric: 'tabular-nums' }}
+   901→                            onClick={(e) => { e.stopPropagation(); setStrikeOverview({ underlying: index, strike: s.strike_price, optionType: 'PE', instrumentKey: s.put_options?.instrument_key || '' }) }}
+   902→                          >
+   903→                            {fmtLtp(pe.ltp)}
+   904→                          </span>
+   905→                        </div>
+   906→                      </div>
+   907→                    </React.Fragment>
+   908→                  )
+   909→                } else {
+   910→                  // OI Mode
+   911→                  const ceOI = ce.oi || 0
+   912→                  const peOI = pe.oi || 0
+   913→                  const ceOIChg = ce.prev_oi > 0 ? ce.oi - ce.prev_oi : 0
+   914→                  const peOIChg = pe.prev_oi > 0 ? pe.oi - pe.prev_oi : 0
+   915→
+   916→                  return (
+   917→                    <React.Fragment key={s.strike_price}>
+   918→                      {showSpotBadge && (
+   919→                        <div
+   920→                          data-spot-badge="true"
+   921→                          className="grid items-center"
+   922→                          style={{ gridTemplateColumns: '1fr 48px 68px 64px 48px 1fr', height: '28px', borderBottom: `1px solid ${C.border}` }}
+   923→                        >
+   924→                          <div className="border-r" style={{ borderColor: C.border, background: C.greenDim }} />
+   925→                          <div className="border-r" style={{ borderColor: C.border }} />
+   926→                          <div
+   927→                            className="flex items-center justify-center gap-1.5"
+   928→                            style={{ borderRight: `1px solid ${C.border}`, background: C.spotBadge }}
+   929→                          >
+   930→                            <Zap className="size-3" style={{ color: C.blue }} />
+   931→                            <span className="text-[10px] font-bold" style={{ color: C.blue, fontVariantNumeric: 'tabular-nums' }}>
+   932→                              {data!.spot.toFixed(2)}
+   933→                            </span>
+   934→                          </div>
+   935→                          <div className="border-r" style={{ borderColor: C.border }} />
+   936→                          <div className="border-r" style={{ borderColor: C.border }} />
+   937→                          <div style={{ background: C.redDim }} />
+   938→                        </div>
+   939→                      )}
+   940→
+   941→                      <div
+   942→                        data-atm={isATM ? 'true' : undefined}
+   943→                        className="grid items-center transition-all duration-100 cursor-pointer group relative"
+   944→                        style={{
+   945→                          gridTemplateColumns: '1fr 48px 68px 64px 48px 1fr',
+   946→                          height: isATM ? '46px' : '38px',
+   947→                          borderBottom: `1px solid ${isATM ? C.atmBorder : C.borderLight}`,
+   948→                          background: isATM ? C.atmBg : 'transparent',
+   949→                        }}
+   950→                        onMouseEnter={e => { if (!isATM) e.currentTarget.style.background = C.surfaceHover }}
+   951→                        onMouseLeave={e => { if (!isATM) e.currentTarget.style.background = 'transparent' }}
+   952→                        onClick={() => {
+   953→                          if (ce.oi >= pe.oi) openTrade('CE', s.strike_price, ce.ltp, 'BUY')
+   954→                          else openTrade('PE', s.strike_price, pe.ltp, 'BUY')
+   955→                        }}
+   956→                      >
+   957→                        {/* CE OI */}
+   958→                        <div
+   959→                          className="flex items-center justify-end pr-3 border-r relative overflow-hidden"
+   960→                          style={{ borderColor: C.border, background: ceITM && !isATM ? C.greenBg : 'transparent' }}
+   961→                        >
+   962→                          {ceOIWidth > 0 && (
+   963→                            <div
+   964→                              className="absolute right-0 top-0 bottom-0 opacity-25"
+   965→                              style={{
+   966→                                width: `${ceOIWidth}%`,
+   967→                                background: `linear-gradient(270deg, ${C.green} 0%, transparent 100%)`,
+   968→                                transition: 'width 0.3s ease',
+   969→                              }}
+   970→                            />
+   971→                          )}
+   972→                          <span className="text-[11px] font-bold relative z-10" style={{ color: C.text, fontVariantNumeric: 'tabular-nums' }}>
+   973→                            {ceOI > 0 ? fmtOI(ceOI) : '-'}
+   974→                          </span>
+   975→                        </div>
+   976→
+   977→                        {/* CE OI Chg */}
+   978→                        <div
+   979→                          className="flex items-center justify-center border-r text-[10px] font-semibold relative z-10"
+   980→                          style={{
+   981→                            borderColor: C.border,
+   982→                            color: ceOIChg > 0 ? C.green : ceOIChg < 0 ? C.red : C.textMuted,
+   983→                            fontVariantNumeric: 'tabular-nums',
+   984→                          }}
+   985→                        >
+   986→                          {ceOIChg !== 0 ? `${ceOIChg > 0 ? '+' : ''}${fmtOI(Math.abs(ceOIChg))}` : '-'}
+   987→                        </div>
+   988→
+   989→                        {/* Strike */}
+   990→                        <div
+   991→                          className="flex flex-col items-center justify-center border-r relative z-10"
+   992→                          style={{ borderColor: C.border, background: isATM ? C.primaryBg : 'transparent' }}
+   993→                        >
+   994→                          <span
+   995→                            className="text-[12px] font-extrabold"
+   996→                            style={{ color: isATM ? C.primary : C.text, fontVariantNumeric: 'tabular-nums' }}
+   997→                          >
+   998→                            {formatINRWhole(s.strike_price)}
+   999→                          </span>
+  1000→                          {isATM && (
+  1001→                            <span className="text-[8px] font-bold mt-px tracking-wider" style={{ color: C.primary }}>ATM</span>
+  1002→                          )}
+  1003→                        </div>
+  1004→
+  1005→                        {/* Spread */}
+  1006→                        <div
+  1007→                          className="flex items-center justify-center border-r relative z-10"
+  1008→                          style={{ borderColor: C.border, background: isATM ? 'rgba(251,191,36,0.06)' : 'transparent' }}
+  1009→                        >
+  1010→                          {spread > 0 ? (
+  1011→                            <span className="text-[11px] font-bold px-1.5 py-0.5 rounded" style={{ color: C.gold, background: 'rgba(251,191,36,0.1)', fontVariantNumeric: 'tabular-nums' }}>
+  1012→                              {spread.toFixed(1)}
+  1013→                            </span>
+  1014→                          ) : (
+  1015→                            <span className="text-[11px]" style={{ color: C.textMuted }}>-</span>
+  1016→                          )}
+  1017→                        </div>
+  1018→
+  1019→                        {/* PE OI Chg */}
+  1020→                        <div
+  1021→                          className="flex items-center justify-center border-r text-[10px] font-semibold relative z-10"
+  1022→                          style={{
+  1023→                            borderColor: C.border,
+  1024→                            color: peOIChg > 0 ? C.green : peOIChg < 0 ? C.red : C.textMuted,
+  1025→                            fontVariantNumeric: 'tabular-nums',
+  1026→                          }}
+  1027→                        >
+  1028→                          {peOIChg !== 0 ? `${peOIChg > 0 ? '+' : ''}${fmtOI(Math.abs(peOIChg))}` : '-'}
+  1029→                        </div>
+  1030→
+  1031→                        {/* PE OI */}
+  1032→                        <div
+  1033→                          className="flex items-center pl-3 relative overflow-hidden"
+  1034→                          style={{ background: peITM && !isATM ? C.redBg : 'transparent' }}
+  1035→                        >
+  1036→                          {peOIWidth > 0 && (
+  1037→                            <div
+  1038→                              className="absolute left-0 top-0 bottom-0 opacity-25"
+  1039→                              style={{
+  1040→                                width: `${peOIWidth}%`,
+  1041→                                background: `linear-gradient(90deg, ${C.red} 0%, transparent 100%)`,
+  1042→                                transition: 'width 0.3s ease',
+  1043→                              }}
+  1044→                            />
+  1045→                          )}
+  1046→                          <span className="text-[11px] font-bold relative z-10" style={{ color: C.text, fontVariantNumeric: 'tabular-nums' }}>
+  1047→                            {peOI > 0 ? fmtOI(peOI) : '-'}
+  1048→                          </span>
+  1049→                        </div>
+  1050→                      </div>
+  1051→                    </React.Fragment>
+  1052→                  )
+  1053→                }
+  1054→              })}
+  1055→
+  1056→              {/* ── Legend ── */}
+  1057→              <div
+  1058→                className="shrink-0 flex items-center justify-center gap-5 py-2 px-3"
+  1059→                style={{ background: C.headerBg, borderTop: `1px solid ${C.border}` }}
+  1060→              >
+  1061→                <span className="flex items-center gap-1.5 text-[9px] font-medium" style={{ color: C.textMuted }}>
+  1062→                  <span className="w-2 h-2 rounded-sm" style={{ background: C.green }} />
+  1063→                  Calls (ITM)
+  1064→                </span>
+  1065→                <span className="flex items-center gap-1.5 text-[9px] font-medium" style={{ color: C.textMuted }}>
+  1066→                  <span className="w-2 h-2 rounded-sm" style={{ background: C.red }} />
+  1067→                  Puts (ITM)
+  1068→                </span>
+  1069→                <span className="flex items-center gap-1.5 text-[9px] font-medium" style={{ color: C.textMuted }}>
+  1070→                  <span className="w-2 h-2 rounded-sm" style={{ background: C.gold }} />
+  1071→                  Spread
+  1072→                </span>
+  1073→                <span className="flex items-center gap-1.5 text-[9px] font-medium" style={{ color: C.textMuted }}>
+  1074→                  <span className="w-2 h-2 rounded-sm" style={{ background: `linear-gradient(270deg, ${C.green}, transparent)`, opacity: 0.5 }} />
+  1075→                  OI Bars
+  1076→                </span>
+  1077→              </div>
+  1078→            </div>
+  1079→          </div>
+  1080→        ) : ocError ? (
+  1081→          <div className="flex-1 flex items-center justify-center p-6">
+  1082→            <div className="text-center max-w-sm p-6 rounded-xl" style={{ background: C.surface, border: `1px solid ${C.border}` }}>
+  1083→              <div className="text-[32px] mb-3">&#9888;&#65039;</div>
+  1084→              <div className="text-[14px] font-bold mb-2" style={{ color: C.text }}>
+  1085→                {ocError === 'upstox_token' ? 'Upstox Token Required' : 'Data Not Available'}
+  1086→              </div>
+  1087→              <div className="text-[12px] leading-relaxed" style={{ color: C.textSec }}>
+  1088→                {ocError === 'upstox_token'
+  1089→                  ? 'Option chain data requires a valid Upstox access token. Please connect your Upstox account or set the token via admin settings.'
+  1090→                  : 'Could not load option chain data. This may be due to a network issue or the data source is unavailable. Please try again.'}
+  1091→              </div>
+  1092→            </div>
+  1093→          </div>
+  1094→        ) : (
+  1095→          <div className="flex-1 flex items-center justify-center">
+  1096→            <span className="text-[12px]" style={{ color: C.textMuted }}>
+  1097→              {live ? 'No data for this expiry' : 'Connecting...'}
+  1098→            </span>
+  1099→          </div>
+  1100→        )}
+  1101→      </div>
+  1102→
+  1103→      {/* ═══ Trade Panel (Bottom Sheet) ═══ */}
+  1104→      {trade.open && (
+  1105→        <div className="fixed inset-0 z-50">
+  1106→          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setTrade(defaultTrade)} />
+  1107→          <div className="absolute bottom-0 left-0 right-0 rounded-t-2xl shadow-2xl max-h-[85vh] overflow-y-auto" style={{ background: C.surface, borderTop: `1px solid ${C.border}` }}>
+  1108→            <div className="flex justify-center pt-2 pb-1">
+  1109→              <div className="w-10 h-1 rounded-full" style={{ background: C.borderAccent }} />
+  1110→            </div>
+  1111→
+  1112→            <div className="flex items-center justify-between px-5 pb-3 border-b" style={{ borderColor: C.border }}>
+  1113→              <div>
+  1114→                <p className="text-sm font-bold" style={{ color: C.text }}>
+  1115→                  {index} {trade.strike} {trade.optionType}
+  1116→                </p>
+  1117→                <p className="text-[11px] mt-0.5" style={{ color: C.textSec }}>
+  1118→                  {fmtExpiry(expiry)} &middot; Lot: {lotSize} &middot; LTP: {formatINR(trade.ltp)}
+  1119→                </p>
+  1120→              </div>
+  1121→              <button onClick={() => setTrade(defaultTrade)} className="p-1.5 rounded-full transition-colors" style={{ color: C.textSec }}
+  1122→                onMouseEnter={e => e.currentTarget.style.background = C.surfaceAlt}
+  1123→                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+  1124→              >
+  1125→                <X className="size-5" />
+  1126→              </button>
+  1127→            </div>
+  1128→
+  1129→            <div className="px-5 py-4 space-y-4">
+  1130→              {/* Buy / Sell Toggle */}
+  1131→              <div className="grid grid-cols-2 gap-2">
+  1132→                <button
+  1133→                  onClick={() => setTrade(t => ({ ...t, side: 'BUY' }))}
+  1134→                  className="py-2.5 rounded-lg text-sm font-bold transition-all duration-200"
+  1135→                  style={{
+  1136→                    background: trade.side === 'BUY' ? C.green : C.surfaceAlt,
+  1137→                    color: trade.side === 'BUY' ? '#fff' : C.textSec,
+  1138→                    border: trade.side === 'BUY' ? `1px solid ${C.green}` : `1px solid ${C.border}`,
+  1139→                  }}
+  1140→                >
+  1141→                  BUY {trade.optionType}
+  1142→                </button>
+  1143→                <button
+  1144→                  onClick={() => setTrade(t => ({ ...t, side: 'SELL' }))}
+  1145→                  className="py-2.5 rounded-lg text-sm font-bold transition-all duration-200"
+  1146→                  style={{
+  1147→                    background: trade.side === 'SELL' ? C.red : C.surfaceAlt,
+  1148→                    color: trade.side === 'SELL' ? '#fff' : C.textSec,
+  1149→                    border: trade.side === 'SELL' ? `1px solid ${C.red}` : `1px solid ${C.border}`,
+  1150→                  }}
+  1151→                >
+  1152→                  SELL {trade.optionType}
+  1153→                </button>
+  1154→              </div>
+  1155→
+  1156→              {/* Order Type + Product */}
+  1157→              <div className="grid grid-cols-2 gap-3">
+  1158→                <div>
+  1159→                  <label className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: C.textMuted }}>Order Type</label>
+  1160→                  <div className="relative mt-1">
+  1161→                    <select
+  1162→                      value={trade.orderType}
+  1163→                      onChange={e => setTrade(t => ({ ...t, orderType: e.target.value as 'MARKET' | 'LIMIT' }))}
+  1164→                      className="w-full px-3 py-2.5 rounded-lg text-sm font-medium appearance-none pr-8"
+  1165→                      style={{ background: C.surfaceAlt, borderColor: C.border, color: C.text, border: `1px solid ${C.border}` }}
+  1166→                    >
+  1167→                      <option value="MARKET">Market</option>
+  1168→                      <option value="LIMIT">Limit</option>
+  1169→                    </select>
+  1170→                    <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 size-4 pointer-events-none mt-0.5" style={{ color: C.textMuted }} />
+  1171→                  </div>
+  1172→                </div>
+  1173→                <div>
+  1174→                  <label className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: C.textMuted }}>Product</label>
+  1175→                  <div className="relative mt-1">
+  1176→                    <select
+  1177→                      value={trade.productType}
+  1178→                      onChange={e => setTrade(t => ({ ...t, productType: e.target.value as 'INTRADAY' | 'DELIVERY' }))}
+  1179→                      className="w-full px-3 py-2.5 rounded-lg text-sm font-medium appearance-none pr-8"
+  1180→                      style={{ background: C.surfaceAlt, borderColor: C.border, color: C.text, border: `1px solid ${C.border}` }}
+  1181→                    >
+  1182→                      <option value="INTRADAY">Intraday</option>
+  1183→                      <option value="DELIVERY">Delivery</option>
+  1184→                    </select>
+  1185→                    <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 size-4 pointer-events-none mt-0.5" style={{ color: C.textMuted }} />
+  1186→                  </div>
+  1187→                </div>
+  1188→              </div>
+  1189→
+  1190→              {/* Limit Price */}
+  1191→              {trade.orderType === 'LIMIT' && (
+  1192→                <div>
+  1193→                  <label className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: C.textMuted }}>Limit Price</label>
+  1194→                  <input
+  1195→                    type="number"
+  1196→                    value={trade.limitPrice}
+  1197→                    onChange={e => setTrade(t => ({ ...t, limitPrice: e.target.value }))}
+  1198→                    placeholder={String(trade.ltp)}
+  1199→                    className="w-full mt-1 px-3 py-2.5 rounded-lg text-sm font-mono"
+  1200→                    style={{ background: C.surfaceAlt, border: `1px solid ${C.border}`, color: C.text }}
+  1201→                    step="0.05"
+  1202→                  />
+  1203→                </div>
+  1204→              )}
+  1205→
+  1206→              {/* Quantity */}
+  1207→              <div>
+  1208→                <label className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: C.textMuted }}>
+  1209→                  Quantity ({trade.lots} lot{trade.lots > 1 ? 's' : ''} = {totalQty} qty)
+  1210→                </label>
+  1211→                <div className="flex items-center gap-3 mt-1">
+  1212→                  <button
+  1213→                    onClick={() => setTrade(t => ({ ...t, lots: Math.max(1, t.lots - 1) }))}
+  1214→                    className="w-10 h-10 rounded-lg flex items-center justify-center transition-colors"
+  1215→                    style={{ border: `1px solid ${C.border}`, background: C.surfaceAlt, color: C.textSec }}
+  1216→                    onMouseEnter={e => e.currentTarget.style.borderColor = C.primary}
+  1217→                    onMouseLeave={e => e.currentTarget.style.borderColor = C.border}
+  1218→                  >
+  1219→                    <Minus className="size-4" />
+  1220→                  </button>
+  1221→                  <input
+  1222→                    type="number"
+  1223→                    value={trade.lots}
+  1224→                    onChange={e => {
+  1225→                      const v = parseInt(e.target.value) || 1
+  1226→                      setTrade(t => ({ ...t, lots: Math.max(1, Math.min(v, 100)) }))
+  1227→                    }}
+  1228→                    className="flex-1 text-center text-lg font-bold font-mono py-2.5 rounded-lg"
+  1229→                    style={{ background: C.surfaceAlt, border: `1px solid ${C.border}`, color: C.text }}
+  1230→                    min={1}
+  1231→                    max={100}
+  1232→                  />
+  1233→                  <button
+  1234→                    onClick={() => setTrade(t => ({ ...t, lots: Math.min(100, t.lots + 1) }))}
+  1235→                    className="w-10 h-10 rounded-lg flex items-center justify-center transition-colors"
+  1236→                    style={{ border: `1px solid ${C.border}`, background: C.surfaceAlt, color: C.textSec }}
+  1237→                    onMouseEnter={e => e.currentTarget.style.borderColor = C.primary}
+  1238→                    onMouseLeave={e => e.currentTarget.style.borderColor = C.border}
+  1239→                  >
+  1240→                    <Plus className="size-4" />
+  1241→                  </button>
+  1242→                </div>
+  1243→              </div>
+  1244→
+  1245→              {/* Stop Loss & Target */}
+  1246→              <div className="grid grid-cols-2 gap-3">
+  1247→                <div>
+  1248→                  <label className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: C.red }}>Stop Loss</label>
+  1249→                  <input
+  1250→                    type="number"
+  1251→                    value={trade.stopLoss}
+  1252→                    onChange={e => setTrade(t => ({ ...t, stopLoss: e.target.value }))}
+  1253→                    placeholder="Optional"
+  1254→                    className="w-full mt-1 px-3 py-2.5 rounded-lg text-sm font-mono"
+  1255→                    style={{ background: C.surfaceAlt, border: `1px solid ${C.border}`, color: C.text }}
+  1256→                    step="0.05"
+  1257→                  />
+  1258→                </div>
+  1259→                <div>
+  1260→                  <label className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: C.green }}>Target</label>
+  1261→                  <input
+  1262→                    type="number"
+  1263→                    value={trade.target}
+  1264→                    onChange={e => setTrade(t => ({ ...t, target: e.target.value }))}
+  1265→                    placeholder="Optional"
+  1266→                    className="w-full mt-1 px-3 py-2.5 rounded-lg text-sm font-mono"
+  1267→                    style={{ background: C.surfaceAlt, border: `1px solid ${C.border}`, color: C.text }}
+  1268→                    step="0.05"
+  1269→                  />
+  1270→                </div>
+  1271→              </div>
+  1272→
+  1273→              {/* Order Summary */}
+  1274→              <div className="rounded-xl p-4 space-y-2 text-xs" style={{ background: C.bg, border: `1px solid ${C.border}` }}>
+  1275→                <div className="flex justify-between">
+  1276→                  <span style={{ color: C.textSec }}>Available Margin</span>
+  1277→                  <span className="font-mono font-bold" style={{ color: availableMargin > totalValue + brokerage ? C.green : C.red, fontVariantNumeric: 'tabular-nums' }}>
+  1278→                    {formatINRWhole(availableMargin)}
+  1279→                  </span>
+  1280→                </div>
+  1281→                <div className="flex justify-between">
+  1282→                  <span style={{ color: C.textSec }}>Price</span>
+  1283→                  <span className="font-mono font-bold" style={{ color: C.text, fontVariantNumeric: 'tabular-nums' }}>
+  1284→                    {trade.orderType === 'LIMIT' && trade.limitPrice ? parseFloat(trade.limitPrice).toFixed(2) : fmtLtp(trade.ltp)}
+  1285→                    {trade.orderType === 'MARKET' && <span className="ml-1" style={{ color: C.textMuted }}>(MKT)</span>}
+  1286→                  </span>
+  1287→                </div>
+  1288→                <div className="flex justify-between">
+  1289→                  <span style={{ color: C.textSec }}>Total Value</span>
+  1290→                  <span className="font-mono font-bold" style={{ color: C.text, fontVariantNumeric: 'tabular-nums' }}>
+  1291→                    {formatINR(totalValue)}
+  1292→                  </span>
+  1293→                </div>
+  1294→                <div className="flex justify-between">
+  1295→                  <span style={{ color: C.textSec }}>Brokerage</span>
+  1296→                  <span className="font-mono" style={{ color: C.text, fontVariantNumeric: 'tabular-nums' }}>
+  1297→                    {formatINR(brokerage)}
+  1298→                  </span>
+  1299→                </div>
+  1300→                {trade.side === 'SELL' && (
+  1301→                  <div className="flex justify-between" style={{ color: C.red }}>
+  1302→                    <span>Margin (150%)</span>
+  1303→                    <span className="font-mono font-bold" style={{ fontVariantNumeric: 'tabular-nums' }}>
+  1304→                      {formatINRWhole(totalValue * 1.5)}
+  1305→                    </span>
+  1306→                  </div>
+  1307→                )}
+  1308→              </div>
+  1309→
+  1310→              {/* Submit */}
+  1311→              <button
+  1312→                onClick={handleConfirm}
+  1313→                disabled={fillPrice <= 0 || !token}
+  1314→                className="w-full py-3.5 rounded-xl text-white font-bold text-sm transition-all duration-200 disabled:opacity-40"
+  1315→                style={{
+  1316→                  background: trade.side === 'BUY'
+  1317→                    ? `linear-gradient(135deg, ${C.green}, #16a34a)`
+  1318→                    : `linear-gradient(135deg, ${C.red}, #dc2626)`,
+  1319→                }}
+  1320→              >
+  1321→                {!token ? 'Login to Trade' : `${trade.side} ${trade.lots} Lot (${totalQty} Qty)`}
+  1322→              </button>
+  1323→            </div>
+  1324→          </div>
+  1325→        </div>
+  1326→      )}
+  1327→
+  1328→      <TradeConfirmModal
+  1329→        open={confirmOpen}
+  1330→        onClose={() => setConfirmOpen(false)}
+  1331→        tradeData={confirmData}
+  1332→        onConfirm={executeTrade}
+  1333→        onSuccess={() => useAppStore.getState().setCurrentPage('positions')}
+  1334→      />
+  1335→
+  1336→      {/* ═══ Strike Overview Drawer ═══════════════════════════════════════ */}
+  1337→      {strikeOverview && (() => {
+  1338→        const strikeData = data?.strikes.find(s => s.strike_price === strikeOverview.strike)
+  1339→        if (!strikeData) return null
+  1340→        const optData = strikeOverview.optionType === 'CE' ? strikeData.call_options : strikeData.put_options
+  1341→        if (!optData?.market_data) return null
+  1342→        return (
+  1343→          <StrikeOverviewDrawer
+  1344→            open={!!strikeOverview}
+  1345→            onOpenChange={(open) => { if (!open) setStrikeOverview(null) }}
+  1346→            underlying={strikeOverview.underlying}
+  1347→            strike={strikeOverview.strike}
+  1348→            optionType={strikeOverview.optionType}
+  1349→            expiry={data?.expiry || expiry}
+  1350→            instrumentKey={strikeOverview.instrumentKey}
+  1351→            ltp={optData.market_data.ltp}
+  1352→            greeks={optData.option_greeks}
+  1353→            marketData={optData.market_data}
+  1354→            spot={data?.spot || 0}
+  1355→            onTrade={() => {
+  1356→              openTrade(strikeOverview.optionType, strikeOverview.strike, optData.market_data.ltp, 'BUY')
+  1357→              setStrikeOverview(null)
+  1358→            }}
+  1359→          />
+  1360→        )
+  1361→      })()}
+  1362→    </div>
+  1363→  )
+  1364→}

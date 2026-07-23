@@ -1,0 +1,1054 @@
+     1→'use client'
+     2→
+     3→import { useState, useEffect, useCallback, useMemo } from 'react'
+     4→import {
+     5→  Card,
+     6→  CardContent,
+     7→  CardHeader,
+     8→  CardTitle,
+     9→} from '@/components/ui/card'
+    10→import { Badge } from '@/components/ui/badge'
+    11→import { Button } from '@/components/ui/button'
+    12→import { Skeleton } from '@/components/ui/skeleton'
+    13→import {
+    14→  Table,
+    15→  TableBody,
+    16→  TableCell,
+    17→  TableHead,
+    18→  TableHeader,
+    19→  TableRow,
+    20→} from '@/components/ui/table'
+    21→import {
+    22→  Dialog,
+    23→  DialogContent,
+    24→  DialogDescription,
+    25→  DialogFooter,
+    26→  DialogHeader,
+    27→  DialogTitle,
+    28→} from '@/components/ui/dialog'
+    29→import {
+    30→  BarChart3,
+    31→  TrendingUp,
+    32→  TrendingDown,
+    33→  ArrowUpRight,
+    34→  ArrowDownRight,
+    35→  Target,
+    36→  Briefcase,
+    37→  Award,
+    38→  Crosshair,
+    39→  Landmark,
+    40→  LineChart,
+    41→  Activity,
+    42→  Download,
+    43→  FileText,
+    44→  Calendar,
+    45→  Loader2,
+    46→} from 'lucide-react'
+    47→import { useAuthStore } from '@/lib/auth-store'
+    48→import { useAppStore } from '@/lib/store'
+    49→import { motion } from 'framer-motion'
+    50→import { toast } from 'sonner'
+    51→import { formatINR, formatINRWhole } from '@/lib/format'
+    52→import { DateFilter, DateFilterPreset, DateRange, getDateRange, isDateInRange } from '@/components/pepertect/date-filter'
+    53→
+    54→// ─── Types ───────────────────────────────────────────────────────
+    55→
+    56→interface TradeData {
+    57→  id: string
+    58→  userId: string
+    59→  segment: string
+    60→  productType: string
+    61→  tradeDirection: string
+    62→  symbol: string
+    63→  optionType?: string | null
+    64→  strikePrice?: number | null
+    65→  expiryDate?: string | null
+    66→  quantity: number
+    67→  fillPrice: number
+    68→  totalValue: number
+    69→  brokerage: number
+    70→  pnl: number | null
+    71→  pnlPercent: number | null
+    72→  executedAt: string
+    73→  squaredOffAt?: string | null
+    74→  createdAt: string
+    75→}
+    76→
+    77→function formatDate(isoDate: string): string {
+    78→  return new Date(isoDate).toLocaleDateString('en-IN', {
+    79→    day: '2-digit',
+    80→    month: 'short',
+    81→    year: '2-digit',
+    82→  })
+    83→}
+    84→
+    85→// ─── Component ───────────────────────────────────────────────────
+    86→
+    87→export function ReportsPage() {
+    88→  const { token } = useAuthStore()
+    89→  const { setCurrentPage, dateFilterPreset, dateFilterRange, setDateFilter } = useAppStore()
+    90→  const [trades, setTrades] = useState<TradeData[]>([])
+    91→  const [loading, setLoading] = useState(true)
+    92→  const [downloadingReport, setDownloadingReport] = useState<string | null>(null)
+    93→  const [confirmDialog, setConfirmDialog] = useState<{ open: boolean; type: 'last' | 'monthly' | 'full' | null }>({ open: false, type: null })
+    94→
+    95→  // ─── Download Report Handler ────────────────────────────────
+    96→  const handleDownloadReport = useCallback(async (type: 'last' | 'monthly' | 'full') => {
+    97→    if (!token) {
+    98→      toast.error('Please login to download reports')
+    99→      setConfirmDialog({ open: false, type: null })
+   100→      return
+   101→    }
+   102→    setDownloadingReport(type)
+   103→    setConfirmDialog({ open: false, type: null })
+   104→
+   105→    const reportLabel = type === 'last' ? 'Last Trade' : type === 'monthly' ? 'Monthly' : 'Full Trading'
+   106→
+   107→    try {
+   108→      toast.loading(`Generating ${reportLabel} report...`, { id: 'pdf-download' })
+   109→
+   110→      const res = await fetch(`/api/profile/report?type=${type}`, {
+   111→        headers: { Authorization: `Bearer ${token}` },
+   112→      })
+   113→
+   114→      if (!res.ok) {
+   115→        let errorMsg = `Failed to generate ${reportLabel} report`
+   116→        try {
+   117→          const errorData = await res.json()
+   118→          errorMsg = errorData.error || errorMsg
+   119→        } catch {
+   120→          // response wasn't JSON
+   121→          if (res.status === 401) errorMsg = 'Session expired. Please login again.'
+   122→          else if (res.status === 500) errorMsg = 'Server error. Please try again later.'
+   123→          else errorMsg = `Error ${res.status}: ${res.statusText}`
+   124→        }
+   125→        throw new Error(errorMsg)
+   126→      }
+   127→
+   128→      // Verify we got a PDF response
+   129→      const contentType = res.headers.get('content-type') || ''
+   130→      if (!contentType.includes('pdf') && !contentType.includes('octet-stream')) {
+   131→        throw new Error('Invalid response format. Expected PDF file.')
+   132→      }
+   133→
+   134→      const blob = await res.blob()
+   135→
+   136→      // Verify blob has content
+   137→      if (blob.size < 100) {
+   138→        throw new Error('Generated PDF is empty or corrupted. Please try again.')
+   139→      }
+   140→
+   141→      // Create download link and trigger download
+   142→      const url = window.URL.createObjectURL(blob)
+   143→      const a = document.createElement('a')
+   144→      a.href = url
+   145→      const filenameMap: Record<string, string> = {
+   146→        last: `pepertect-last-trade-${new Date().toISOString().split('T')[0]}.pdf`,
+   147→        monthly: `pepertect-monthly-report-${new Date().toISOString().split('T')[0]}.pdf`,
+   148→        full: `pepertect-full-report-${new Date().toISOString().split('T')[0]}.pdf`,
+   149→      }
+   150→      a.download = filenameMap[type]
+   151→      a.style.display = 'none'
+   152→      document.body.appendChild(a)
+   153→      a.click()
+   154→
+   155→      // Cleanup after a short delay to ensure download starts
+   156→      setTimeout(() => {
+   157→        document.body.removeChild(a)
+   158→        window.URL.revokeObjectURL(url)
+   159→      }, 250)
+   160→
+   161→      toast.dismiss('pdf-download')
+   162→      toast.success(`${reportLabel} report downloaded successfully!`, {
+   163→        description: `File: ${filenameMap[type]}`,
+   164→        duration: 4000,
+   165→      })
+   166→    } catch (err: unknown) {
+   167→      toast.dismiss('pdf-download')
+   168→      const errorMessage = err instanceof Error ? err.message : 'Failed to download report. Please try again.'
+   169→      toast.error(errorMessage, { duration: 6000 })
+   170→      console.error('[Report Download Error]', err)
+   171→    } finally {
+   172→      setDownloadingReport(null)
+   173→    }
+   174→  }, [token])
+   175→
+   176→  // ─── Fetch All Data ───────────────────────────────────────
+   177→  const fetchData = useCallback(async () => {
+   178→    if (!token) return
+   179→    try {
+   180→      const tradesRes = await fetch('/api/trade/trades?limit=100', {
+   181→        headers: { Authorization: `Bearer ${token}` },
+   182→      })
+   183→      if (tradesRes.ok) {
+   184→        const json = await tradesRes.json()
+   185→        setTrades(json.data || [])
+   186→      }
+   187→    } catch {
+   188→      // silent
+   189→    } finally {
+   190→      setLoading(false)
+   191→    }
+   192→  }, [token])
+   193→
+   194→  useEffect(() => {
+   195→    fetchData()
+   196→  }, [fetchData])
+   197→
+   198→  // ─── Computed Metrics ─────────────────────────────────────
+   199→
+   200→  // ─── Date Filtered Data ─────────────────────────────────
+   201→  const activeDateRange = useMemo(() => getDateRange(dateFilterPreset, dateFilterRange), [dateFilterPreset, dateFilterRange])
+   202→
+   203→  const filteredTrades = useMemo(() =>
+   204→    trades.filter(t => isDateInRange(t.executedAt, activeDateRange)),
+   205→    [trades, activeDateRange]
+   206→  )
+   207→
+   208→  const handleDateFilterChange = useCallback((preset: DateFilterPreset, range?: DateRange) => {
+   209→    setDateFilter(preset, range)
+   210→  }, [setDateFilter])
+   211→
+   212→  const closedTrades = useMemo(() =>
+   213→    filteredTrades.filter(t => t.pnl !== null && t.pnl !== undefined),
+   214→    [filteredTrades]
+   215→  )
+   216→
+   217→  const totalPnl = useMemo(() =>
+   218→    closedTrades.reduce((sum, t) => sum + (t.pnl || 0), 0),
+   219→    [closedTrades]
+   220→  )
+   221→
+   222→  const winningTrades = useMemo(() =>
+   223→    closedTrades.filter(t => (t.pnl || 0) > 0),
+   224→    [closedTrades]
+   225→  )
+   226→
+   227→  const losingTrades = useMemo(() =>
+   228→    closedTrades.filter(t => (t.pnl || 0) < 0),
+   229→    [closedTrades]
+   230→  )
+   231→
+   232→  const winRate = useMemo(() => {
+   233→    if (closedTrades.length === 0) return 0
+   234→    return Math.round((winningTrades.length / closedTrades.length) * 10000) / 100
+   235→  }, [closedTrades, winningTrades])
+   236→
+   237→  const avgPnlPerTrade = useMemo(() => {
+   238→    if (closedTrades.length === 0) return 0
+   239→    return Math.round((totalPnl / closedTrades.length) * 100) / 100
+   240→  }, [closedTrades, totalPnl])
+   241→
+   242→  // ─── Stats Config ─────────────────────────────────────────
+   243→
+   244→  const stats = [
+   245→    {
+   246→      label: 'Total Trades',
+   247→      value: String(filteredTrades.length),
+   248→      icon: Crosshair,
+   249→      borderColor: 'border-l-[#00D09C]',
+   250→      textColor: 'text-[#00D09C]',
+   251→      bgColor: 'bg-[#00D09C]/10',
+   252→      valueColor: 'text-foreground',
+   253→    },
+   254→    {
+   255→      label: 'Win Rate',
+   256→      value: `${winRate.toFixed(1)}%`,
+   257→      icon: Target,
+   258→      borderColor: winRate >= 50 ? 'border-l-[#00d09c]' : 'border-l-[#eb5b3c]',
+   259→      textColor: winRate >= 50 ? 'text-[#00B386]' : 'text-[#EB5B3C]',
+   260→      bgColor: winRate >= 50 ? 'bg-[#00B386]/10' : 'bg-[#EB5B3C]/10',
+   261→      valueColor: winRate >= 50 ? 'text-[#00B386]' : 'text-[#EB5B3C]',
+   262→    },
+   263→    {
+   264→      label: 'Total P&L',
+   265→      value: totalPnl >= 0 ? `+${formatINR(Math.abs(totalPnl))}` : `-${formatINR(Math.abs(totalPnl))}`,
+   266→      icon: Landmark,
+   267→      borderColor: totalPnl >= 0 ? 'border-l-[#00d09c]' : 'border-l-[#eb5b3c]',
+   268→      textColor: totalPnl >= 0 ? 'text-[#00B386]' : 'text-[#EB5B3C]',
+   269→      bgColor: totalPnl >= 0 ? 'bg-[#00B386]/10' : 'bg-[#EB5B3C]/10',
+   270→      valueColor: totalPnl >= 0 ? 'text-[#00B386]' : 'text-[#EB5B3C]',
+   271→    },
+   272→    {
+   273→      label: 'Avg P&L / Trade',
+   274→      value: avgPnlPerTrade >= 0 ? `+${formatINR(Math.abs(avgPnlPerTrade))}` : `-${formatINR(Math.abs(avgPnlPerTrade))}`,
+   275→      icon: BarChart3,
+   276→      borderColor: avgPnlPerTrade >= 0 ? 'border-l-[#00d09c]' : 'border-l-[#eb5b3c]',
+   277→      textColor: avgPnlPerTrade >= 0 ? 'text-[#00B386]' : 'text-[#EB5B3C]',
+   278→      bgColor: avgPnlPerTrade >= 0 ? 'bg-[#00B386]/10' : 'bg-[#EB5B3C]/10',
+   279→      valueColor: avgPnlPerTrade >= 0 ? 'text-[#00B386]' : 'text-[#EB5B3C]',
+   280→    },
+   281→  ]
+   282→
+   283→  // ─── Render ───────────────────────────────────────────────
+   284→
+   285→  if (loading) {
+   286→    return (
+   287→      <div className="min-h-screen bg-background px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+   288→        <div>
+   289→          <Skeleton className="h-8 w-48 mb-2 bg-muted" />
+   290→          <Skeleton className="h-4 w-72 bg-muted" />
+   291→        </div>
+   292→        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+   293→          {Array.from({ length: 4 }).map((_, i) => (
+   294→            <Card key={i} className="bg-card border border-border rounded-xl">
+   295→              <CardContent className="p-4">
+   296→                <Skeleton className="h-3 w-20 mb-2 bg-muted" />
+   297→                <Skeleton className="h-6 w-28 bg-muted" />
+   298→              </CardContent>
+   299→            </Card>
+   300→          ))}
+   301→        </div>
+   302→        <Skeleton className="h-80 w-full rounded-xl bg-muted" />
+   303→      </div>
+   304→    )
+   305→  }
+   306→
+   307→  return (
+   308→    <div className="min-h-screen bg-background px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+   309→      {/* ── Page Header ─────────────────────────────────────────── */}
+   310→      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+   311→        <div>
+   312→          <h1 className="text-2xl sm:text-3xl font-bold text-foreground tracking-tight">
+   313→            Reports
+   314→          </h1>
+   315→          <p className="text-muted-foreground mt-1 text-sm">
+   316→            Analyze your trading performance, P&L trends, and trade history.
+   317→          </p>
+   318→        </div>
+   319→        <DateFilter
+   320→          value={dateFilterPreset}
+   321→          onChange={handleDateFilterChange}
+   322→          customRange={dateFilterRange}
+   323→        />
+   324→      </div>
+   325→
+   326→      {/* ── Stats Grid ──────────────────────────────────────────── */}
+   327→      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+   328→        {stats.map((stat, idx) => {
+   329→          const Icon = stat.icon
+   330→          return (
+   331→            <motion.div
+   332→              key={stat.label}
+   333→              initial={{ opacity: 0, y: 20 }}
+   334→              animate={{ opacity: 1, y: 0 }}
+   335→              transition={{ delay: idx * 0.1, duration: 0.5, ease: [0.34, 1.56, 0.64, 1] }}
+   336→            >
+   337→              <Card className={`bg-card border border-border rounded-xl shadow-sm border-l-4 ${stat.borderColor}`}>
+   338→                <CardContent className="p-4">
+   339→                  <div className="flex items-center justify-between mb-2">
+   340→                    <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+   341→                      {stat.label}
+   342→                    </p>
+   343→                    <div className={`size-7 rounded-lg ${stat.bgColor} flex items-center justify-center`}>
+   344→                      <Icon className={`size-3.5 ${stat.textColor}`} />
+   345→                    </div>
+   346→                  </div>
+   347→                  <p className={`text-lg font-bold font-mono-data font-tabular ${stat.valueColor}`}>
+   348→                    {stat.value}
+   349→                  </p>
+   350→                </CardContent>
+   351→              </Card>
+   352→            </motion.div>
+   353→          )
+   354→        })}
+   355→      </div>
+   356→
+   357→      {/* ── Empty State ─────────────────────────────────────────── */}
+   358→      {filteredTrades.length === 0 ? (
+   359→        <Card className="bg-card border border-border rounded-xl shadow-sm">
+   360→          <CardContent className="py-16">
+   361→            <div className="flex flex-col items-center justify-center text-center">
+   362→              <div className="size-14 rounded-full bg-background flex items-center justify-center mb-4">
+   363→                <BarChart3 className="size-7 text-muted-foreground/40" />
+   364→              </div>
+   365→              <p className="text-foreground font-semibold text-sm">No trades yet</p>
+   366→              <p className="text-muted-foreground text-xs mt-1">
+   367→                Place your first trade to start tracking performance
+   368→              </p>
+   369→              <Button
+   370→                size="sm"
+   371→                className="mt-4 gap-1.5 bg-[#00D09C] hover:bg-[#00b88a] text-white font-semibold rounded-lg"
+   372→                onClick={() => setCurrentPage('trading')}
+   373→              >
+   374→                <TrendingUp className="size-3.5" />
+   375→                Start Trading
+   376→              </Button>
+   377→            </div>
+   378→          </CardContent>
+   379→        </Card>
+   380→      ) : (
+   381→        <>
+   382→          {/* ── Date Filter Info ──────────────────────────────── */}
+   383→          {dateFilterPreset !== 'all' && (
+   384→            <div className="flex items-center gap-2 text-xs text-muted-foreground bg-card px-3 py-2 rounded-lg border border-border/50">
+   385→              <Calendar className="size-3.5 text-[#00D09C]" />
+   386→              Showing {filteredTrades.length} of {trades.length} trades for{' '}
+   387→              <span className="font-semibold text-foreground">
+   388→                {dateFilterPreset === 'custom' && dateFilterRange
+   389→                  ? `${new Date(dateFilterRange.from).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })} → ${new Date(dateFilterRange.to).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}`
+   390→                  : dateFilterPreset.charAt(0).toUpperCase() + dateFilterPreset.slice(1)}
+   391→              </span>
+   392→            </div>
+   393→          )}
+   394→
+   395→          {/* ── P&L Chart Placeholder ────────────────────────────── */}
+   396→          <motion.div
+   397→            initial={{ opacity: 0, y: 20 }}
+   398→            animate={{ opacity: 1, y: 0 }}
+   399→            transition={{ delay: 0.2, duration: 0.5, ease: [0.34, 1.56, 0.64, 1] }}
+   400→          >
+   401→            <Card className="bg-card border border-border rounded-xl shadow-sm">
+   402→              <CardHeader className="pb-2">
+   403→                <div className="flex items-center justify-between">
+   404→                  <div className="flex items-center gap-2">
+   405→                    <LineChart className="size-5 text-[#00D09C]" />
+   406→                    <div>
+   407→                      <CardTitle className="text-base font-semibold text-foreground">
+   408→                        P&amp;L Trend
+   409→                      </CardTitle>
+   410→                      <p className="text-xs text-muted-foreground mt-0.5">
+   411→                        Track your cumulative profit and loss over time
+   412→                      </p>
+   413→                    </div>
+   414→                  </div>
+   415→                  <Badge
+   416→                    variant="outline"
+   417→                    className={`text-[10px] font-semibold border-0 ${
+   418→                      totalPnl >= 0
+   419→                        ? 'bg-[#00B386]/10 text-[#00B386]'
+   420→                        : 'bg-[#EB5B3C]/10 text-[#EB5B3C]'
+   421→                    }`}
+   422→                  >
+   423→                    {totalPnl >= 0 ? <ArrowUpRight className="size-3 mr-0.5" /> : <ArrowDownRight className="size-3 mr-0.5" />}
+   424→                    {totalPnl >= 0 ? '+' : '-'}{formatINR(Math.abs(totalPnl))}
+   425→                  </Badge>
+   426→                </div>
+   427→              </CardHeader>
+   428→              <CardContent>
+   429→                <div className="flex flex-col items-center justify-center py-16 text-center bg-card rounded-xl border border-border/50">
+   430→                  <div className="size-16 rounded-full bg-[#00D09C]/8 flex items-center justify-center mb-4">
+   431→                    <Activity className="size-8 text-[#00D09C]/40" />
+   432→                  </div>
+   433→                  <p className="text-foreground font-semibold text-sm">Analytics not available yet</p>
+   434→                  <p className="text-muted-foreground text-xs mt-1 max-w-xs">
+   435→                    Advanced P&L charts, trend analysis, and performance visualizations are being built. Stay tuned!
+   436→                  </p>
+   437→                </div>
+   438→              </CardContent>
+   439→            </Card>
+   440→          </motion.div>
+   441→
+   442→          {/* ── Win/Loss + Performance Breakdown ──────────────────── */}
+   443→          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+   444→            {/* Win/Loss Summary */}
+   445→            <motion.div
+   446→              initial={{ opacity: 0, y: 20 }}
+   447→              animate={{ opacity: 1, y: 0 }}
+   448→              transition={{ delay: 0.3, duration: 0.5, ease: [0.34, 1.56, 0.64, 1] }}
+   449→            >
+   450→              <Card className="bg-card border border-border rounded-xl shadow-sm h-full">
+   451→                <CardHeader className="pb-2">
+   452→                  <div className="flex items-center gap-2">
+   453→                    <Target className="size-5 text-[#00D09C]" />
+   454→                    <div>
+   455→                      <CardTitle className="text-base font-semibold text-foreground">
+   456→                        Win / Loss Summary
+   457→                      </CardTitle>
+   458→                      <p className="text-xs text-muted-foreground mt-0.5">
+   459→                        Breakdown of profitable vs losing trades
+   460→                      </p>
+   461→                    </div>
+   462→                  </div>
+   463→                </CardHeader>
+   464→                <CardContent>
+   465→                  {closedTrades.length > 0 ? (
+   466→                    <div className="space-y-5">
+   467→                      {/* Win Rate Bar */}
+   468→                      <div>
+   469→                        <div className="flex items-center justify-between mb-2">
+   470→                          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Win Rate</span>
+   471→                          <span className={`font-mono-data font-tabular text-sm font-bold ${winRate >= 50 ? 'text-[#00B386]' : 'text-[#EB5B3C]'}`}>
+   472→                            {winRate.toFixed(1)}%
+   473→                          </span>
+   474→                        </div>
+   475→                        <div className="flex h-3 w-full overflow-hidden rounded-full bg-muted">
+   476→                          {winningTrades.length > 0 && (
+   477→                            <div
+   478→                              className="h-full bg-[#00d09c] rounded-l-full transition-all duration-700"
+   479→                              style={{ width: `${(winningTrades.length / closedTrades.length) * 100}%` }}
+   480→                            />
+   481→                          )}
+   482→                          {losingTrades.length > 0 && (
+   483→                            <div
+   484→                              className="h-full bg-[#eb5b3c] transition-all duration-700"
+   485→                              style={{ width: `${(losingTrades.length / closedTrades.length) * 100}%` }}
+   486→                            />
+   487→                          )}
+   488→                        </div>
+   489→                        <div className="flex items-center justify-between mt-2">
+   490→                          <div className="flex items-center gap-1.5">
+   491→                            <span className="size-2.5 rounded-full bg-[#00d09c]" />
+   492→                            <span className="text-[11px] text-muted-foreground">Wins ({winningTrades.length})</span>
+   493→                          </div>
+   494→                          <div className="flex items-center gap-1.5">
+   495→                            <span className="size-2.5 rounded-full bg-[#eb5b3c]" />
+   496→                            <span className="text-[11px] text-muted-foreground">Losses ({losingTrades.length})</span>
+   497→                          </div>
+   498→                        </div>
+   499→                      </div>
+   500→
+   501→                      <div className="h-px bg-[#e5e7eb]" />
+   502→
+   503→                      {/* Win Details */}
+   504→                      <div className="space-y-3">
+   505→                        <div className="flex items-center justify-between">
+   506→                          <div className="flex items-center gap-2">
+   507→                            <div className="size-8 rounded-lg bg-[#00B386]/10 flex items-center justify-center">
+   508→                              <TrendingUp className="size-4 text-[#00B386]" />
+   509→                            </div>
+   510→                            <span className="text-sm font-semibold text-foreground">Winning Trades</span>
+   511→                          </div>
+   512→                          <div className="text-right">
+   513→                            <p className="font-mono-data font-tabular text-sm font-semibold text-[#00B386]">
+   514→                              +{formatINR(winningTrades.reduce((s, t) => s + (t.pnl || 0), 0))}
+   515→                            </p>
+   516→                          </div>
+   517→                        </div>
+   518→                        {winningTrades.length > 0 && (
+   519→                          <div className="flex items-center justify-between pl-10">
+   520→                            <span className="text-xs text-muted-foreground">Best Trade</span>
+   521→                            <span className="font-mono-data font-tabular text-xs font-semibold text-[#00B386]">
+   522→                              +{formatINR(Math.max(...winningTrades.map(t => t.pnl || 0)))}
+   523→                            </span>
+   524→                          </div>
+   525→                        )}
+   526→                        {winningTrades.length > 0 && (
+   527→                          <div className="flex items-center justify-between pl-10">
+   528→                            <span className="text-xs text-muted-foreground">Avg Win</span>
+   529→                            <span className="font-mono-data font-tabular text-xs font-semibold text-[#00B386]">
+   530→                              +{formatINR(winningTrades.reduce((s, t) => s + (t.pnl || 0), 0) / winningTrades.length)}
+   531→                            </span>
+   532→                          </div>
+   533→                        )}
+   534→                      </div>
+   535→
+   536→                      <div className="h-px bg-[#e5e7eb]" />
+   537→
+   538→                      {/* Loss Details */}
+   539→                      <div className="space-y-3">
+   540→                        <div className="flex items-center justify-between">
+   541→                          <div className="flex items-center gap-2">
+   542→                            <div className="size-8 rounded-lg bg-[#EB5B3C]/10 flex items-center justify-center">
+   543→                              <TrendingDown className="size-4 text-[#EB5B3C]" />
+   544→                            </div>
+   545→                            <span className="text-sm font-semibold text-foreground">Losing Trades</span>
+   546→                          </div>
+   547→                          <div className="text-right">
+   548→                            <p className="font-mono-data font-tabular text-sm font-semibold text-[#EB5B3C]">
+   549→                              -{formatINR(Math.abs(losingTrades.reduce((s, t) => s + (t.pnl || 0), 0)))}
+   550→                            </p>
+   551→                          </div>
+   552→                        </div>
+   553→                        {losingTrades.length > 0 && (
+   554→                          <div className="flex items-center justify-between pl-10">
+   555→                            <span className="text-xs text-muted-foreground">Worst Trade</span>
+   556→                            <span className="font-mono-data font-tabular text-xs font-semibold text-[#EB5B3C]">
+   557→                              -{formatINR(Math.abs(Math.min(...losingTrades.map(t => t.pnl || 0))))}
+   558→                            </span>
+   559→                          </div>
+   560→                        )}
+   561→                        {losingTrades.length > 0 && (
+   562→                          <div className="flex items-center justify-between pl-10">
+   563→                            <span className="text-xs text-muted-foreground">Avg Loss</span>
+   564→                            <span className="font-mono-data font-tabular text-xs font-semibold text-[#EB5B3C]">
+   565→                              -{formatINR(Math.abs(losingTrades.reduce((s, t) => s + (t.pnl || 0), 0) / losingTrades.length))}
+   566→                            </span>
+   567→                          </div>
+   568→                        )}
+   569→                      </div>
+   570→                    </div>
+   571→                  ) : (
+   572→                    <div className="flex flex-col items-center justify-center py-12 text-center">
+   573→                      <div className="size-14 rounded-full bg-background flex items-center justify-center mb-4">
+   574→                        <Target className="size-7 text-muted-foreground/40" />
+   575→                      </div>
+   576→                      <p className="text-sm text-muted-foreground">No closed trades to analyze</p>
+   577→                      <p className="text-xs text-muted-foreground/60 mt-1">
+   578→                        Win/loss data appears after closing positions
+   579→                      </p>
+   580→                    </div>
+   581→                  )}
+   582→                </CardContent>
+   583→              </Card>
+   584→            </motion.div>
+   585→
+   586→            {/* Segment Breakdown */}
+   587→            <motion.div
+   588→              initial={{ opacity: 0, y: 20 }}
+   589→              animate={{ opacity: 1, y: 0 }}
+   590→              transition={{ delay: 0.4, duration: 0.5, ease: [0.34, 1.56, 0.64, 1] }}
+   591→            >
+   592→              <Card className="bg-card border border-border rounded-xl shadow-sm h-full">
+   593→                <CardHeader className="pb-2">
+   594→                  <div className="flex items-center gap-2">
+   595→                    <BarChart3 className="size-5 text-[#00D09C]" />
+   596→                    <div>
+   597→                      <CardTitle className="text-base font-semibold text-foreground">
+   598→                        Segment Breakdown
+   599→                      </CardTitle>
+   600→                      <p className="text-xs text-muted-foreground mt-0.5">
+   601→                        Performance across Equity, Futures & Options
+   602→                      </p>
+   603→                    </div>
+   604→                  </div>
+   605→                </CardHeader>
+   606→                <CardContent>
+   607→                  {(() => {
+   608→                    const segmentData = [
+   609→                      { name: 'Equity', icon: Briefcase, color: '#00D09C', trades: filteredTrades.filter(t => t.segment === 'EQUITY' || t.segment === 'CASH') },
+   610→                      { name: 'Futures', icon: TrendingUp, color: '#00d09c', trades: filteredTrades.filter(t => t.segment === 'FUTURES') },
+   611→                      { name: 'Options', icon: Award, color: '#eb5b3c', trades: filteredTrades.filter(t => t.segment === 'OPTIONS') },
+   612→                    ]
+   613→                    // Always show all 3 segments, even with 0 trades
+   614→
+   615→                    if (filteredTrades.length === 0) {
+   616→                      return (
+   617→                        <div className="flex flex-col items-center justify-center py-12 text-center">
+   618→                          <div className="size-14 rounded-full bg-background flex items-center justify-center mb-4">
+   619→                            <BarChart3 className="size-7 text-muted-foreground/40" />
+   620→                          </div>
+   621→                          <p className="text-sm text-muted-foreground">No segment data yet</p>
+   622→                          <p className="text-xs text-muted-foreground/60 mt-1">
+   623→                            Trade in different segments to see breakdown
+   624→                          </p>
+   625→                        </div>
+   626→                      )
+   627→                    }
+   628→
+   629→                    return (
+   630→                      <div className="space-y-4">
+   631→                        {segmentData.map((segment) => {
+   632→                          const Icon = segment.icon
+   633→                          const segmentPnl = segment.trades.reduce((s, t) => s + (t.pnl || 0), 0)
+   634→                          const isProfit = segmentPnl >= 0
+   635→                          const closedCount = segment.trades.filter(t => t.pnl !== null).length
+   636→                          return (
+   637→                            <div
+   638→                              key={segment.name}
+   639→                              className="rounded-xl bg-card border border-border/50 p-4 hover:bg-background transition-colors"
+   640→                            >
+   641→                              <div className="flex items-center justify-between mb-3">
+   642→                                <div className="flex items-center gap-2.5">
+   643→                                  <div
+   644→                                    className="size-8 rounded-lg flex items-center justify-center"
+   645→                                    style={{ backgroundColor: `${segment.color}12` }}
+   646→                                  >
+   647→                                    <Icon className="size-4" style={{ color: segment.color }} />
+   648→                                  </div>
+   649→                                  <div>
+   650→                                    <span className="text-sm font-semibold text-foreground">{segment.name}</span>
+   651→                                    <span className="ml-2 text-[10px] text-muted-foreground">
+   652→                                      {segment.trades.length} trade{segment.trades.length !== 1 ? 's' : ''}
+   653→                                    </span>
+   654→                                  </div>
+   655→                                </div>
+   656→                                {closedCount > 0 && (
+   657→                                  <Badge
+   658→                                    variant="outline"
+   659→                                    className={`text-[10px] font-semibold border-0 ${
+   660→                                      isProfit
+   661→                                        ? 'bg-[#00B386]/10 text-[#00B386]'
+   662→                                        : 'bg-[#EB5B3C]/10 text-[#EB5B3C]'
+   663→                                    }`}
+   664→                                  >
+   665→                                    {isProfit ? '+' : ''}{segmentPnl >= 0 ? '+' : '-'}{formatINR(Math.abs(segmentPnl))}
+   666→                                  </Badge>
+   667→                                )}
+   668→                              </div>
+   669→
+   670→                              <div className="grid grid-cols-2 gap-3">
+   671→                                <div>
+   672→                                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+   673→                                    Total Trades
+   674→                                  </p>
+   675→                                  <p className="font-mono-data font-tabular text-sm font-semibold text-foreground mt-0.5">
+   676→                                    {segment.trades.length}
+   677→                                  </p>
+   678→                                </div>
+   679→                                <div>
+   680→                                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+   681→                                    Closed P&amp;L
+   682→                                  </p>
+   683→                                  <p className={`font-mono-data font-tabular text-sm font-semibold mt-0.5 ${closedCount === 0 ? 'text-muted-foreground' : isProfit ? 'text-[#00B386]' : 'text-[#EB5B3C]'}`}>
+   684→                                    {closedCount === 0 ? '—' : `${isProfit ? '+' : '-'}${formatINR(Math.abs(segmentPnl))}`}
+   685→                                  </p>
+   686→                                </div>
+   687→                              </div>
+   688→                            </div>
+   689→                          )
+   690→                        })}
+   691→                      </div>
+   692→                    )
+   693→                  })()}
+   694→                </CardContent>
+   695→              </Card>
+   696→            </motion.div>
+   697→          </div>
+   698→
+   699→          {/* ── Recent Trades Table ────────────────────────────────── */}
+   700→          <motion.div
+   701→            initial={{ opacity: 0, y: 20 }}
+   702→            animate={{ opacity: 1, y: 0 }}
+   703→            transition={{ delay: 0.5, duration: 0.5, ease: [0.34, 1.56, 0.64, 1] }}
+   704→          >
+   705→            <Card className="bg-card border border-border rounded-xl shadow-sm">
+   706→              <CardHeader className="pb-2">
+   707→                <div className="flex items-center justify-between">
+   708→                  <div className="flex items-center gap-2">
+   709→                    <Crosshair className="size-5 text-[#00D09C]" />
+   710→                    <div>
+   711→                      <CardTitle className="text-base font-semibold text-foreground">
+   712→                        Recent Trades
+   713→                      </CardTitle>
+   714→                      <p className="text-xs text-muted-foreground mt-0.5">
+   715→                        Your latest trade executions with P&L details
+   716→                      </p>
+   717→                    </div>
+   718→                  </div>
+   719→                  <Badge variant="secondary" className="bg-[#00D09C]/10 text-[#00D09C] border-0 text-xs font-semibold">
+   720→                    {filteredTrades.length} Trade{filteredTrades.length !== 1 ? 's' : ''}
+   721→                  </Badge>
+   722→                </div>
+   723→              </CardHeader>
+   724→              <CardContent>
+   725→                <div className="overflow-x-auto max-h-96 overflow-y-auto">
+   726→                  <Table>
+   727→                    <TableHeader>
+   728→                      <TableRow className="hover:bg-transparent border-b border-border">
+   729→                        <TableHead className="text-xs font-semibold text-muted-foreground tracking-wider uppercase bg-card">Symbol</TableHead>
+   730→                        <TableHead className="text-xs font-semibold text-muted-foreground tracking-wider uppercase bg-card">Side</TableHead>
+   731→                        <TableHead className="text-xs font-semibold text-muted-foreground tracking-wider uppercase bg-card">Segment</TableHead>
+   732→                        <TableHead className="text-right text-xs font-semibold text-muted-foreground tracking-wider uppercase bg-card">Qty</TableHead>
+   733→                        <TableHead className="text-right text-xs font-semibold text-muted-foreground tracking-wider uppercase bg-card">Fill Price</TableHead>
+   734→                        <TableHead className="text-right text-xs font-semibold text-muted-foreground tracking-wider uppercase bg-card">Total Value</TableHead>
+   735→                        <TableHead className="text-right text-xs font-semibold text-muted-foreground tracking-wider uppercase bg-card">P&L</TableHead>
+   736→                        <TableHead className="text-right text-xs font-semibold text-muted-foreground tracking-wider uppercase bg-card">Date</TableHead>
+   737→                      </TableRow>
+   738→                    </TableHeader>
+   739→                    <TableBody className="divide-y divide-border">
+   740→                      {filteredTrades.map((trade) => {
+   741→                        const isBuy = trade.tradeDirection === 'BUY'
+   742→                        const hasPnl = trade.pnl !== null && trade.pnl !== undefined
+   743→                        const isPositive = hasPnl && trade.pnl! >= 0
+   744→                        return (
+   745→                          <TableRow
+   746→                            key={trade.id}
+   747→                            className="hover:bg-card transition-colors"
+   748→                          >
+   749→                            <TableCell>
+   750→                              <div className="flex flex-col">
+   751→                                <span className="font-bold text-sm text-[#00D09C]">{trade.symbol}</span>
+   752→                                {trade.segment === 'OPTIONS' && trade.strikePrice && (
+   753→                                  <span className="text-[10px] uppercase text-muted-foreground">
+   754→                                    {trade.strikePrice} {trade.optionType}
+   755→                                  </span>
+   756→                                )}
+   757→                                {trade.segment === 'FUTURES' && (
+   758→                                  <span className="text-[10px] text-muted-foreground">FUT</span>
+   759→                                )}
+   760→                              </div>
+   761→                            </TableCell>
+   762→                            <TableCell>
+   763→                              <Badge
+   764→                                variant="secondary"
+   765→                                className={`text-[10px] font-semibold border-0 gap-0.5 ${
+   766→                                  isBuy ? 'bg-[#00B386]/10 text-[#00B386]' : 'bg-[#EB5B3C]/10 text-[#EB5B3C]'
+   767→                                }`}
+   768→                              >
+   769→                                {isBuy ? <ArrowUpRight className="size-2.5" /> : <ArrowDownRight className="size-2.5" />}
+   770→                                {isBuy ? 'Buy' : 'Sell'}
+   771→                              </Badge>
+   772→                            </TableCell>
+   773→                            <TableCell className="text-xs text-muted-foreground">{trade.segment}</TableCell>
+   774→                            <TableCell className="font-mono-data font-tabular text-sm text-right text-foreground">{trade.quantity}</TableCell>
+   775→                            <TableCell className="font-mono-data font-tabular text-sm text-right text-muted-foreground">
+   776→                              {formatINR(trade.fillPrice)}
+   777→                            </TableCell>
+   778→                            <TableCell className="font-mono-data font-tabular text-sm text-right text-foreground">
+   779→                              {formatINRWhole(trade.totalValue)}
+   780→                            </TableCell>
+   781→                            <TableCell className={`font-mono-data font-tabular text-sm font-semibold text-right ${
+   782→                              !hasPnl ? 'text-muted-foreground' : isPositive ? 'text-[#00B386]' : 'text-[#EB5B3C]'
+   783→                            }`}>
+   784→                              {!hasPnl ? '—' : `${isPositive ? '+' : '-'}${formatINR(Math.abs(trade.pnl!))}`}
+   785→                            </TableCell>
+   786→                            <TableCell className="text-xs text-muted-foreground text-right">
+   787→                              {formatDate(trade.executedAt)}
+   788→                            </TableCell>
+   789→                          </TableRow>
+   790→                        )
+   791→                      })}
+   792→                    </TableBody>
+   793→                  </Table>
+   794→                </div>
+   795→              </CardContent>
+   796→            </Card>
+   797→          </motion.div>
+   798→
+   799→          {/* ── Performance Summary Footer ─────────────────────────── */}
+   800→          {closedTrades.length > 0 && (
+   801→            <motion.div
+   802→              initial={{ opacity: 0, y: 20 }}
+   803→              animate={{ opacity: 1, y: 0 }}
+   804→              transition={{ delay: 0.6, duration: 0.5, ease: [0.34, 1.56, 0.64, 1] }}
+   805→            >
+   806→              <Card className="bg-card border border-border rounded-xl shadow-sm border-l-4 border-l-[#00D09C]">
+   807→                <CardContent className="p-5">
+   808→                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+   809→                    Performance Summary
+   810→                  </p>
+   811→                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+   812→                    <div>
+   813→                      <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+   814→                        Gross Profit
+   815→                      </p>
+   816→                      <p className="font-mono-data font-tabular text-sm font-bold text-[#00B386] mt-0.5">
+   817→                        +{formatINR(winningTrades.reduce((s, t) => s + (t.pnl || 0), 0))}
+   818→                      </p>
+   819→                    </div>
+   820→                    <div>
+   821→                      <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+   822→                        Gross Loss
+   823→                      </p>
+   824→                      <p className="font-mono-data font-tabular text-sm font-bold text-[#EB5B3C] mt-0.5">
+   825→                        -{formatINR(Math.abs(losingTrades.reduce((s, t) => s + (t.pnl || 0), 0)))}
+   826→                      </p>
+   827→                    </div>
+   828→                    <div>
+   829→                      <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+   830→                        Total Brokerage
+   831→                      </p>
+   832→                      <p className="font-mono-data font-tabular text-sm font-bold text-foreground mt-0.5">
+   833→                        {formatINR(filteredTrades.reduce((s, t) => s + t.brokerage, 0))}
+   834→                      </p>
+   835→                    </div>
+   836→                    <div>
+   837→                      <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+   838→                        Net P&amp;L
+   839→                      </p>
+   840→                      <p className={`font-mono-data font-tabular text-sm font-bold mt-0.5 ${totalPnl >= 0 ? 'text-[#00B386]' : 'text-[#EB5B3C]'}`}>
+   841→                        {totalPnl >= 0 ? '+' : '-'}{formatINR(Math.abs(totalPnl))}
+   842→                      </p>
+   843→                    </div>
+   844→                  </div>
+   845→                </CardContent>
+   846→              </Card>
+   847→            </motion.div>
+   848→          )}
+   849→
+   850→          {/* ── Download Reports Section ────────────────────────────── */}
+   851→          <motion.div
+   852→            initial={{ opacity: 0, y: 20 }}
+   853→            animate={{ opacity: 1, y: 0 }}
+   854→            transition={{ delay: 0.7, duration: 0.5, ease: [0.34, 1.56, 0.64, 1] }}
+   855→          >
+   856→            <Card className="bg-card border border-border rounded-xl shadow-sm">
+   857→              <CardHeader className="pb-3">
+   858→                <div className="flex items-center gap-2">
+   859→                  <Download className="size-5 text-[#00D09C]" />
+   860→                  <div>
+   861→                    <CardTitle className="text-base font-semibold text-foreground">
+   862→                      Download Reports
+   863→                    </CardTitle>
+   864→                    <p className="text-xs text-muted-foreground mt-0.5">
+   865→                      Export your trading data as PDF reports
+   866→                    </p>
+   867→                  </div>
+   868→                </div>
+   869→              </CardHeader>
+   870→              <CardContent>
+   871→                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+   872→                  {/* Last Trade Report */}
+   873→                  <div className="rounded-xl border border-border bg-card p-5 hover:border-[#00D09C]/30 hover:bg-[#e6faf4]/30 transition-all group">
+   874→                    <div className="flex items-center gap-3 mb-3">
+   875→                      <div className="size-10 rounded-lg bg-[#00D09C]/10 flex items-center justify-center shrink-0 group-hover:bg-[#00D09C]/20 transition-colors">
+   876→                        <FileText className="size-5 text-[#00D09C]" />
+   877→                      </div>
+   878→                      <div>
+   879→                        <p className="text-sm font-semibold text-foreground">Last Trade Report</p>
+   880→                        <p className="text-[11px] text-muted-foreground mt-0.5">Your most recent trade</p>
+   881→                      </div>
+   882→                    </div>
+   883→                    <Button
+   884→                      size="sm"
+   885→                      className="w-full gap-2 bg-[#00D09C] hover:bg-[#00b88a] text-white font-semibold rounded-lg"
+   886→                      onClick={() => setConfirmDialog({ open: true, type: 'last' })}
+   887→                      disabled={downloadingReport !== null}
+   888→                    >
+   889→                      {downloadingReport === 'last' ? (
+   890→                        <Loader2 className="size-4 animate-spin" />
+   891→                      ) : (
+   892→                        <Download className="size-4" />
+   893→                      )}
+   894→                      {downloadingReport === 'last' ? 'Downloading...' : 'Download PDF'}
+   895→                    </Button>
+   896→                  </div>
+   897→
+   898→                  {/* Monthly Report */}
+   899→                  <div className="rounded-xl border border-border bg-card p-5 hover:border-[#00D09C]/30 hover:bg-[#e6faf4]/30 transition-all group">
+   900→                    <div className="flex items-center gap-3 mb-3">
+   901→                      <div className="size-10 rounded-lg bg-[#00D09C]/10 flex items-center justify-center shrink-0 group-hover:bg-[#00D09C]/20 transition-colors">
+   902→                        <Calendar className="size-5 text-[#00D09C]" />
+   903→                      </div>
+   904→                      <div>
+   905→                        <p className="text-sm font-semibold text-foreground">Monthly Report</p>
+   906→                        <p className="text-[11px] text-muted-foreground mt-0.5">Last 30 days of trading</p>
+   907→                      </div>
+   908→                    </div>
+   909→                    <Button
+   910→                      size="sm"
+   911→                      className="w-full gap-2 bg-[#00D09C] hover:bg-[#00b88a] text-white font-semibold rounded-lg"
+   912→                      onClick={() => setConfirmDialog({ open: true, type: 'monthly' })}
+   913→                      disabled={downloadingReport !== null}
+   914→                    >
+   915→                      {downloadingReport === 'monthly' ? (
+   916→                        <Loader2 className="size-4 animate-spin" />
+   917→                      ) : (
+   918→                        <Download className="size-4" />
+   919→                      )}
+   920→                      {downloadingReport === 'monthly' ? 'Downloading...' : 'Download PDF'}
+   921→                    </Button>
+   922→                  </div>
+   923→
+   924→                  {/* Full Trading Report */}
+   925→                  <div className="rounded-xl border border-border bg-card p-5 hover:border-[#00D09C]/30 hover:bg-[#e6faf4]/30 transition-all group">
+   926→                    <div className="flex items-center gap-3 mb-3">
+   927→                      <div className="size-10 rounded-lg bg-[#00D09C]/10 flex items-center justify-center shrink-0 group-hover:bg-[#00D09C]/20 transition-colors">
+   928→                        <BarChart3 className="size-5 text-[#00D09C]" />
+   929→                      </div>
+   930→                      <div>
+   931→                        <p className="text-sm font-semibold text-foreground">Full Trading Report</p>
+   932→                        <p className="text-[11px] text-muted-foreground mt-0.5">All your trading data</p>
+   933→                      </div>
+   934→                    </div>
+   935→                    <Button
+   936→                      size="sm"
+   937→                      className="w-full gap-2 bg-[#00D09C] hover:bg-[#00b88a] text-white font-semibold rounded-lg"
+   938→                      onClick={() => setConfirmDialog({ open: true, type: 'full' })}
+   939→                      disabled={downloadingReport !== null}
+   940→                    >
+   941→                      {downloadingReport === 'full' ? (
+   942→                        <Loader2 className="size-4 animate-spin" />
+   943→                      ) : (
+   944→                        <Download className="size-4" />
+   945→                      )}
+   946→                      {downloadingReport === 'full' ? 'Downloading...' : 'Download PDF'}
+   947→                    </Button>
+   948→                  </div>
+   949→                </div>
+   950→              </CardContent>
+   951→            </Card>
+   952→          </motion.div>
+   953→        </>
+   954→      )}
+   955→
+   956→      {/* ── Download Confirmation Dialog ──────────────────────────── */}
+   957→      <Dialog
+   958→        open={confirmDialog.open}
+   959→        onOpenChange={(open) => setConfirmDialog({ open, type: open ? confirmDialog.type : null })}
+   960→      >
+   961→        <DialogContent className="sm:max-w-lg">
+   962→          <DialogHeader>
+   963→            <DialogTitle className="text-foreground flex items-center gap-2">
+   964→              <div className="size-8 rounded-lg bg-[#00D09C]/10 flex items-center justify-center">
+   965→                <FileText className="size-4 text-[#00D09C]" />
+   966→              </div>
+   967→              Download {confirmDialog.type === 'last' ? 'Last Trade' : confirmDialog.type === 'monthly' ? 'Monthly' : 'Full Trading'} Report
+   968→            </DialogTitle>
+   969→            <DialogDescription className="text-muted-foreground">
+   970→              {confirmDialog.type === 'last'
+   971→                ? 'Generate a PDF report of your most recent trade.'
+   972→                : confirmDialog.type === 'monthly'
+   973→                ? 'Generate a PDF report of all trades from the last 30 days.'
+   974→                : 'Generate a comprehensive PDF of all your trading data.'}
+   975→            </DialogDescription>
+   976→          </DialogHeader>
+   977→
+   978→          {/* Report Preview */}
+   979→          <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+   980→            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+   981→              Report includes:
+   982→            </p>
+   983→            <div className="space-y-2">
+   984→              {[
+   985→                { label: 'User profile & account details', included: true },
+   986→                { label: 'Trade details table with P&L', included: true },
+   987→                { label: 'Performance summary & stats', included: true },
+   988→                { label: 'Brokerage breakdown', included: true },
+   989→                { label: 'AI analysis & suggestions', included: confirmDialog.type !== 'last' || trades.length > 0 },
+   990→              ].filter(item => item.included).map((item, i) => (
+   991→                <div key={i} className="flex items-center gap-2">
+   992→                  <div className="size-4 rounded-full bg-[#00D09C]/10 flex items-center justify-center shrink-0">
+   993→                    <svg className="size-2.5 text-[#00D09C]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+   994→                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+   995→                    </svg>
+   996→                  </div>
+   997→                  <span className="text-sm text-foreground">{item.label}</span>
+   998→                </div>
+   999→              ))}
+  1000→            </div>
+  1001→
+  1002→            {confirmDialog.type && (
+  1003→              <div className="pt-2 border-t border-border">
+  1004→                <div className="flex items-center justify-between text-xs">
+  1005→                  <span className="text-muted-foreground">Trade count:</span>
+  1006→                  <span className="font-semibold text-foreground">
+  1007→                    {confirmDialog.type === 'last' ? '1 trade' : confirmDialog.type === 'monthly' ? `Last 30 days` : `All trades`}
+  1008→                  </span>
+  1009→                </div>
+  1010→                <div className="flex items-center justify-between text-xs mt-1">
+  1011→                  <span className="text-muted-foreground">Format:</span>
+  1012→                  <span className="font-semibold text-foreground">PDF Document</span>
+  1013→                </div>
+  1014→              </div>
+  1015→            )}
+  1016→          </div>
+  1017→
+  1018→          <DialogFooter className="gap-2 sm:gap-0">
+  1019→            <Button
+  1020→              variant="outline"
+  1021→              className="rounded-lg border-border text-muted-foreground hover:bg-background"
+  1022→              onClick={() => setConfirmDialog({ open: false, type: null })}
+  1023→              disabled={downloadingReport !== null}
+  1024→            >
+  1025→              Cancel
+  1026→            </Button>
+  1027→            <Button
+  1028→              className="gap-2 bg-[#00D09C] hover:bg-[#00b88a] text-white font-semibold rounded-lg min-w-[140px]"
+  1029→              onClick={() => {
+  1030→                if (confirmDialog.type) {
+  1031→                  handleDownloadReport(confirmDialog.type)
+  1032→                }
+  1033→              }}
+  1034→              disabled={downloadingReport !== null}
+  1035→            >
+  1036→              {downloadingReport !== null ? (
+  1037→                <>
+  1038→                  <Loader2 className="size-4 animate-spin" />
+  1039→                  Generating...
+  1040→                </>
+  1041→              ) : (
+  1042→                <>
+  1043→                  <Download className="size-4" />
+  1044→                  Download PDF
+  1045→                </>
+  1046→              )}
+  1047→            </Button>
+  1048→          </DialogFooter>
+  1049→        </DialogContent>
+  1050→      </Dialog>
+  1051→    </div>
+  1052→  )
+  1053→}
+  1054→

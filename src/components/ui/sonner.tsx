@@ -1,14 +1,22 @@
 "use client"
 
-import { useTheme } from "next-themes"
 import { Toaster as Sonner, ToasterProps } from "sonner"
+import { useTheme } from 'next-themes'
+import { useSyncExternalStore } from 'react'
+
+const emptySubscribe = () => () => {}
+
+function useIsMounted() {
+  return useSyncExternalStore(emptySubscribe, () => true, () => false)
+}
 
 const Toaster = ({ ...props }: ToasterProps) => {
-  const { theme = "system" } = useTheme()
+  const { resolvedTheme } = useTheme()
+  const mounted = useIsMounted()
 
   return (
     <Sonner
-      theme={theme as ToasterProps["theme"]}
+      theme={mounted ? (resolvedTheme as 'light' | 'dark') : 'light'}
       className="toaster group"
       style={
         {

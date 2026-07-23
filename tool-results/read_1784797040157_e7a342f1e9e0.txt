@@ -1,0 +1,606 @@
+     1→'use client'
+     2→
+     3→import { useState, useEffect, useCallback } from 'react'
+     4→import { Button } from '@/components/ui/button'
+     5→import { Badge } from '@/components/ui/badge'
+     6→import { Skeleton } from '@/components/ui/skeleton'
+     7→import {
+     8→  Dialog,
+     9→  DialogContent,
+    10→  DialogDescription,
+    11→  DialogFooter,
+    12→  DialogHeader,
+    13→  DialogTitle,
+    14→} from '@/components/ui/dialog'
+    15→import { useAuthStore } from '@/lib/auth-store'
+    16→import { useAppStore } from '@/lib/store'
+    17→import { motion } from 'framer-motion'
+    18→import { toast } from 'sonner'
+    19→import { cn } from '@/lib/utils'
+    20→import {
+    21→  ArrowLeft,
+    22→  Monitor,
+    23→  Smartphone,
+    24→  Tablet,
+    25→  Globe,
+    26→  Clock,
+    27→  LogOut,
+    28→  MapPin,
+    29→  Shield,
+    30→  Chrome,
+    31→  AlertTriangle,
+    32→  Loader2,
+    33→  MonitorSmartphone,
+    34→  Wifi,
+    35→  Fingerprint,
+    36→  KeyRound,
+    37→  Activity,
+    38→  ChevronRight,
+    39→  ExternalLink,
+    40→} from 'lucide-react'
+    41→
+    42→// ─── Types ───────────────────────────────────────────────────────
+    43→
+    44→interface SessionInfo {
+    45→  id: string
+    46→  browser: string
+    47→  os: string
+    48→  deviceType: string
+    49→  location: string | null
+    50→  ipAddress: string | null
+    51→  device: string
+    52→  isCurrent: boolean
+    53→  createdAt: string
+    54→  expiresAt: string
+    55→}
+    56→
+    57→function formatRelativeTime(dateStr: string): string {
+    58→  const now = new Date()
+    59→  const date = new Date(dateStr)
+    60→  const diffMs = now.getTime() - date.getTime()
+    61→  const diffSec = Math.floor(diffMs / 1000)
+    62→  const diffMin = Math.floor(diffSec / 60)
+    63→  const diffHr = Math.floor(diffMin / 60)
+    64→  const diffDay = Math.floor(diffHr / 24)
+    65→
+    66→  if (diffSec < 60) return 'Just now'
+    67→  if (diffMin < 60) return `${diffMin} min${diffMin !== 1 ? 's' : ''} ago`
+    68→  if (diffHr < 24) return `${diffHr} hour${diffHr !== 1 ? 's' : ''} ago`
+    69→  if (diffDay < 7) return `${diffDay} day${diffDay !== 1 ? 's' : ''} ago`
+    70→  return date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+    71→}
+    72→
+    73→function formatFullDate(dateStr: string): string {
+    74→  return new Date(dateStr).toLocaleString('en-IN', {
+    75→    day: '2-digit',
+    76→    month: 'long',
+    77→    year: 'numeric',
+    78→    hour: '2-digit',
+    79→    minute: '2-digit',
+    80→    second: '2-digit',
+    81→    hour12: true,
+    82→  })
+    83→}
+    84→
+    85→function formatExpiry(dateStr: string): string {
+    86→  return new Date(dateStr).toLocaleString('en-IN', {
+    87→    day: '2-digit',
+    88→    month: 'long',
+    89→    year: 'numeric',
+    90→    hour: '2-digit',
+    91→    minute: '2-digit',
+    92→    hour12: true,
+    93→  })
+    94→}
+    95→
+    96→function getBrowserIcon(browser: string) {
+    97→  const b = browser.toLowerCase()
+    98→  if (b.includes('chrome')) return '🌐'
+    99→  if (b.includes('firefox')) return '🦊'
+   100→  if (b.includes('safari')) return '🧭'
+   101→  if (b.includes('edge')) return '🔷'
+   102→  if (b.includes('opera')) return '🔴'
+   103→  return '🌐'
+   104→}
+   105→
+   106→function getOsIcon(os: string) {
+   107→  const o = os.toLowerCase()
+   108→  if (o.includes('windows')) return '🪟'
+   109→  if (o.includes('mac')) return '🍎'
+   110→  if (o.includes('linux')) return '🐧'
+   111→  if (o.includes('android')) return '🤖'
+   112→  if (o.includes('ios') || o.includes('iphone') || o.includes('ipad')) return '📱'
+   113→  if (o.includes('chrome')) return '💻'
+   114→  return '💻'
+   115→}
+   116→
+   117→// ─── Animation ───────────────────────────────────────────────────
+   118→
+   119→const fadeInUp = {
+   120→  hidden: { opacity: 0, y: 16 },
+   121→  visible: (i: number) => ({
+   122→    opacity: 1,
+   123→    y: 0,
+   124→    transition: { delay: i * 0.05, duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] },
+   125→  }),
+   126→}
+   127→
+   128→// ─── Component ───────────────────────────────────────────────────
+   129→
+   130→export function ActiveDevicesPage() {
+   131→  const { token, logout } = useAuthStore()
+   132→  const { setCurrentPage } = useAppStore()
+   133→  const [sessions, setSessions] = useState<SessionInfo[]>([])
+   134→  const [sessionsLoading, setSessionsLoading] = useState(true)
+   135→  const [logoutAllConfirmOpen, setLogoutAllConfirmOpen] = useState(false)
+   136→  const [logoutAllSubmitting, setLogoutAllSubmitting] = useState(false)
+   137→  const [loggingOutSessionId, setLoggingOutSessionId] = useState<string | null>(null)
+   138→  const [expandedSession, setExpandedSession] = useState<string | null>(null)
+   139→
+   140→  // Fetch Sessions
+   141→  const fetchSessions = useCallback(async () => {
+   142→    if (!token) return
+   143→    setSessionsLoading(true)
+   144→    try {
+   145→      const res = await fetch('/api/auth/sessions', {
+   146→        headers: { Authorization: `Bearer ${token}` },
+   147→      })
+   148→      if (res.ok) {
+   149→        const data = await res.json()
+   150→        setSessions(data.sessions || [])
+   151→      }
+   152→    } catch {
+   153→      // Silent
+   154→    } finally {
+   155→      setSessionsLoading(false)
+   156→    }
+   157→  }, [token])
+   158→
+   159→  useEffect(() => {
+   160→    fetchSessions()
+   161→  }, [fetchSessions])
+   162→
+   163→  // Logout single session
+   164→  const handleLogoutSession = async (sessionId: string) => {
+   165→    if (!token) return
+   166→    setLoggingOutSessionId(sessionId)
+   167→    try {
+   168→      const res = await fetch(`/api/auth/sessions/${sessionId}`, {
+   169→        method: 'DELETE',
+   170→        headers: { Authorization: `Bearer ${token}` },
+   171→      })
+   172→      if (res.ok) {
+   173→        toast.success('Device logged out successfully')
+   174→        setSessions(prev => prev.filter(s => s.id !== sessionId))
+   175→        setExpandedSession(null)
+   176→      } else {
+   177→        const data = await res.json()
+   178→        toast.error(data.error || 'Failed to logout device')
+   179→      }
+   180→    } catch {
+   181→      toast.error('Failed to logout device')
+   182→    } finally {
+   183→      setLoggingOutSessionId(null)
+   184→    }
+   185→  }
+   186→
+   187→  // Logout all
+   188→  const handleLogoutAll = async () => {
+   189→    if (!token) return
+   190→    setLogoutAllSubmitting(true)
+   191→    try {
+   192→      const res = await fetch('/api/profile/logout-all', {
+   193→        method: 'POST',
+   194→        headers: { Authorization: `Bearer ${token}` },
+   195→      })
+   196→      const data = await res.json()
+   197→      if (!res.ok) throw new Error(data.message || 'Failed')
+   198→      toast.success(`Logged out from ${data.sessionsTerminated} device(s)`)
+   199→      setLogoutAllConfirmOpen(false)
+   200→      fetchSessions()
+   201→    } catch {
+   202→      toast.error('Failed to logout from all devices')
+   203→    } finally {
+   204→      setLogoutAllSubmitting(false)
+   205→    }
+   206→  }
+   207→
+   208→  const currentSession = sessions.find(s => s.isCurrent)
+   209→  const otherSessions = sessions.filter(s => !s.isCurrent)
+   210→
+   211→  let si = 0
+   212→
+   213→  return (
+   214→    <div className="p-4 sm:p-6 lg:p-8 space-y-6 max-w-3xl mx-auto bg-background min-h-screen">
+   215→      {/* ── Header ──────────────────────────────────────────── */}
+   216→      <motion.div custom={si++} variants={fadeInUp} initial="hidden" animate="visible">
+   217→        <div className="flex items-center gap-3 mb-1">
+   218→          <button
+   219→            onClick={() => setCurrentPage('profile')}
+   220→            className="size-9 rounded-lg bg-card border border-border flex items-center justify-center hover:bg-muted transition-colors"
+   221→          >
+   222→            <ArrowLeft className="size-4 text-muted-foreground" />
+   223→          </button>
+   224→          <div className="flex items-center gap-2.5">
+   225→            <div className="size-9 rounded-lg bg-[#00D09C]/10 flex items-center justify-center">
+   226→              <MonitorSmartphone className="size-5 text-[#00D09C]" />
+   227→            </div>
+   228→            <div>
+   229→              <h1 className="text-lg font-bold text-foreground">Active Devices</h1>
+   230→              <p className="text-xs text-muted-foreground">Manage your login sessions</p>
+   231→            </div>
+   232→          </div>
+   233→        </div>
+   234→      </motion.div>
+   235→
+   236→      {/* ── Overview Card ────────────────────────────────────── */}
+   237→      <motion.div custom={si++} variants={fadeInUp} initial="hidden" animate="visible">
+   238→        <div className="bg-card border border-border rounded-2xl shadow-sm p-5">
+   239→          <div className="flex items-center justify-between">
+   240→            <div className="flex items-center gap-4">
+   241→              <div className="flex -space-x-2">
+   242→                <div className="size-10 rounded-full bg-[#00D09C] flex items-center justify-center ring-2 ring-white">
+   243→                  <Monitor className="size-5 text-white" />
+   244→                </div>
+   245→                {otherSessions.length > 0 && (
+   246→                  <div className="size-10 rounded-full bg-[#5367ff] flex items-center justify-center ring-2 ring-white">
+   247→                    <span className="text-xs font-bold text-white">+{otherSessions.length}</span>
+   248→                  </div>
+   249→                )}
+   250→              </div>
+   251→              <div>
+   252→                <p className="text-sm font-semibold text-foreground">
+   253→                  {sessions.length} Active Device{sessions.length !== 1 ? 's' : ''}
+   254→                </p>
+   255→                <p className="text-xs text-muted-foreground">
+   256→                  Your account is currently logged in on {sessions.length} device{sessions.length !== 1 ? 's' : ''}
+   257→                </p>
+   258→              </div>
+   259→            </div>
+   260→            {otherSessions.length > 0 && (
+   261→              <Button
+   262→                variant="outline"
+   263→                size="sm"
+   264→                onClick={() => setLogoutAllConfirmOpen(true)}
+   265→                className="text-xs font-semibold text-[#EB5B3C] border-[#eb5b3c]/20 hover:bg-[#EB5B3C]/5 hover:text-[#EB5B3C] gap-1.5"
+   266→              >
+   267→                <LogOut className="size-3.5" />
+   268→                Logout All
+   269→              </Button>
+   270→            )}
+   271→          </div>
+   272→
+   273→          {/* Security Tip */}
+   274→          {otherSessions.length > 0 && (
+   275→            <div className="mt-4 p-3 rounded-xl bg-[#fef2ef] border border-[#eb5b3c]/10 flex items-start gap-2.5">
+   276→              <AlertTriangle className="size-4 text-[#EB5B3C] shrink-0 mt-0.5" />
+   277→              <div>
+   278→                <p className="text-xs font-semibold text-[#EB5B3C]">Security Tip</p>
+   279→                <p className="text-[11px] text-muted-foreground mt-0.5">
+   280→                  If you see any device you don&apos;t recognize, logout from it immediately and change your password.
+   281→                </p>
+   282→              </div>
+   283→            </div>
+   284→          )}
+   285→        </div>
+   286→      </motion.div>
+   287→
+   288→      {/* ── Loading State ────────────────────────────────────── */}
+   289→      {sessionsLoading ? (
+   290→        <div className="space-y-3">
+   291→          {[1, 2].map(i => (
+   292→            <div key={i} className="bg-card border border-border rounded-2xl p-5">
+   293→              <div className="flex items-center gap-4">
+   294→                <Skeleton className="size-12 rounded-xl" />
+   295→                <div className="flex-1 space-y-2">
+   296→                  <Skeleton className="h-4 w-40" />
+   297→                  <Skeleton className="h-3 w-60" />
+   298→                </div>
+   299→              </div>
+   300→            </div>
+   301→          ))}
+   302→        </div>
+   303→      ) : (
+   304→        <div className="space-y-4">
+   305→          {/* ── Current Device ────────────────────────────────── */}
+   306→          {currentSession && (
+   307→            <motion.div custom={si++} variants={fadeInUp} initial="hidden" animate="visible">
+   308→              <div className="bg-card border-2 border-[#00D09C]/20 rounded-2xl shadow-sm overflow-hidden">
+   309→                <div className="p-5">
+   310→                  <div className="flex items-center justify-between mb-4">
+   311→                    <div className="flex items-center gap-2">
+   312→                      <div className="size-2 rounded-full bg-[#00D09C] animate-pulse" />
+   313→                      <span className="text-xs font-bold text-[#00D09C] uppercase tracking-wider">Current Device</span>
+   314→                    </div>
+   315→                    <Badge className="bg-[#00D09C]/10 text-[#00D09C] border-0 text-[10px] px-2 py-0.5 font-bold">
+   316→                      <Shield className="size-3 mr-1" />
+   317→                      Active Now
+   318→                    </Badge>
+   319→                  </div>
+   320→
+   321→                  <div className="flex items-start gap-4">
+   322→                    {/* Device Icon */}
+   323→                    <div className={cn(
+   324→                      "size-14 rounded-xl flex items-center justify-center shrink-0",
+   325→                      currentSession.deviceType === 'Mobile'
+   326→                        ? "bg-[#5367ff]/10"
+   327→                        : currentSession.deviceType === 'Tablet'
+   328→                          ? "bg-[#f59e0b]/10"
+   329→                          : "bg-[#00D09C]/10"
+   330→                    )}>
+   331→                      {currentSession.deviceType === 'Mobile' ? (
+   332→                        <Smartphone className="size-7 text-[#5367ff]" />
+   333→                      ) : currentSession.deviceType === 'Tablet' ? (
+   334→                        <Tablet className="size-7 text-[#f59e0b]" />
+   335→                      ) : (
+   336→                        <Monitor className="size-7 text-[#00D09C]" />
+   337→                      )}
+   338→                    </div>
+   339→
+   340→                    {/* Device Info */}
+   341→                    <div className="flex-1 min-w-0">
+   342→                      <h3 className="text-base font-bold text-foreground flex items-center gap-2">
+   343→                        <span>{getOsIcon(currentSession.os)}</span>
+   344→                        {currentSession.os}
+   345→                      </h3>
+   346→                      <div className="mt-2 space-y-1.5">
+   347→                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+   348→                          <Globe className="size-3.5 shrink-0 text-muted-foreground" />
+   349→                          <span>{currentSession.browser}</span>
+   350→                        </div>
+   351→                        {currentSession.ipAddress && (
+   352→                          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+   353→                            <Wifi className="size-3.5 shrink-0 text-muted-foreground" />
+   354→                            <span>IP: {currentSession.ipAddress.split(',')[0].trim()}</span>
+   355→                          </div>
+   356→                        )}
+   357→                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+   358→                          <MapPin className="size-3.5 shrink-0 text-[#00D09C]" />
+   359→                          <span className="font-medium">{currentSession.location && currentSession.location !== 'Unknown Location' ? currentSession.location : 'Detecting...'}</span>
+   360→                        </div>
+   361→                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+   362→                          <Clock className="size-3.5 shrink-0 text-muted-foreground" />
+   363→                          <span>Login: {formatRelativeTime(currentSession.createdAt)}</span>
+   364→                        </div>
+   365→                      </div>
+   366→                    </div>
+   367→                  </div>
+   368→
+   369→                  {/* Expanded Details */}
+   370→                  <div className="mt-4 pt-4 border-t border-border/50">
+   371→                    <button
+   372→                      onClick={() => setExpandedSession(expandedSession === currentSession.id ? null : currentSession.id)}
+   373→                      className="flex items-center gap-1.5 text-xs font-semibold text-[#5367ff] hover:text-[#4356e0] transition-colors"
+   374→                    >
+   375→                      {expandedSession === currentSession.id ? 'Hide' : 'Show'} Details
+   376→                      <ChevronRight className={cn(
+   377→                        "size-3 transition-transform",
+   378→                        expandedSession === currentSession.id && "rotate-90"
+   379→                      )} />
+   380→                    </button>
+   381→                    {expandedSession === currentSession.id && (
+   382→                      <motion.div
+   383→                        initial={{ opacity: 0, height: 0 }}
+   384→                        animate={{ opacity: 1, height: 'auto' }}
+   385→                        className="mt-3 space-y-2"
+   386→                      >
+   387→                        <DetailRow icon={Fingerprint} label="Session ID" value={currentSession.id.slice(0, 16) + '...'} />
+   388→                        <DetailRow icon={KeyRound} label="Browser" value={currentSession.browser} />
+   389→                        <DetailRow icon={Monitor} label="Device Type" value={currentSession.deviceType} />
+   390→                        <DetailRow icon={Globe} label="IP Address" value={currentSession.ipAddress?.split(',')[0].trim() || 'N/A'} />
+   391→                        <DetailRow icon={MapPin} label="Location" value={currentSession.location || 'Unknown'} />
+   392→                        <DetailRow icon={Clock} label="Login Time" value={formatFullDate(currentSession.createdAt)} />
+   393→                        <DetailRow icon={Shield} label="Session Expires" value={formatExpiry(currentSession.expiresAt)} />
+   394→                      </motion.div>
+   395→                    )}
+   396→                  </div>
+   397→                </div>
+   398→              </div>
+   399→            </motion.div>
+   400→          )}
+   401→
+   402→          {/* ── Other Devices ─────────────────────────────────── */}
+   403→          {otherSessions.length > 0 && (
+   404→            <motion.div custom={si++} variants={fadeInUp} initial="hidden" animate="visible">
+   405→              <div className="flex items-center gap-2 mb-1 px-1">
+   406→                <h2 className="text-sm font-bold text-foreground">Other Devices</h2>
+   407→                <Badge className="bg-muted text-muted-foreground border-0 text-[10px] px-1.5 py-0 font-bold">
+   408→                  {otherSessions.length}
+   409→                </Badge>
+   410→              </div>
+   411→            </motion.div>
+   412→          )}
+   413→
+   414→          {otherSessions.map((session, idx) => (
+   415→            <motion.div
+   416→              key={session.id}
+   417→              custom={si++}
+   418→              variants={fadeInUp}
+   419→              initial="hidden"
+   420→              animate="visible"
+   421→            >
+   422→              <div className={cn(
+   423→                "bg-card border rounded-2xl shadow-sm overflow-hidden transition-all",
+   424→                expandedSession === session.id ? "border-[#5367ff]/20" : "border-border hover:border-border/80"
+   425→              )}>
+   426→                <div className="p-5">
+   427→                  <div className="flex items-start gap-4">
+   428→                    {/* Device Icon */}
+   429→                    <div className={cn(
+   430→                      "size-12 rounded-xl flex items-center justify-center shrink-0",
+   431→                      session.deviceType === 'Mobile'
+   432→                        ? "bg-[#5367ff]/10"
+   433→                        : session.deviceType === 'Tablet'
+   434→                          ? "bg-[#f59e0b]/10"
+   435→                          : "bg-muted"
+   436→                    )}>
+   437→                      {session.deviceType === 'Mobile' ? (
+   438→                        <Smartphone className="size-6 text-[#5367ff]" />
+   439→                      ) : session.deviceType === 'Tablet' ? (
+   440→                        <Tablet className="size-6 text-[#f59e0b]" />
+   441→                      ) : (
+   442→                        <Monitor className="size-6 text-muted-foreground" />
+   443→                      )}
+   444→                    </div>
+   445→
+   446→                    {/* Device Info */}
+   447→                    <div className="flex-1 min-w-0">
+   448→                      <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
+   449→                        <span>{getOsIcon(session.os)}</span>
+   450→                        {session.os}
+   451→                      </h3>
+   452→                      <div className="mt-1.5 space-y-1">
+   453→                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+   454→                          <Globe className="size-3 shrink-0" />
+   455→                          <span>{session.browser}</span>
+   456→                          {session.ipAddress && (
+   457→                            <>
+   458→                              <span className="text-muted-foreground">·</span>
+   459→                              <span>{session.ipAddress.split(',')[0].trim()}</span>
+   460→                            </>
+   461→                          )}
+   462→                        </div>
+   463→                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+   464→                          <MapPin className="size-3 shrink-0 text-[#5367ff]" />
+   465→                          <span>{session.location && session.location !== 'Unknown Location' ? session.location : 'Detecting...'}</span>
+   466→                        </div>
+   467→                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+   468→                          <Clock className="size-3 shrink-0" />
+   469→                          <span>{formatRelativeTime(session.createdAt)}</span>
+   470→                        </div>
+   471→                      </div>
+   472→                    </div>
+   473→
+   474→                    {/* Logout Button */}
+   475→                    <Button
+   476→                      variant="outline"
+   477→                      size="sm"
+   478→                      disabled={loggingOutSessionId === session.id}
+   479→                      onClick={() => handleLogoutSession(session.id)}
+   480→                      className="text-xs font-semibold text-[#EB5B3C] border-[#eb5b3c]/20 hover:bg-[#EB5B3C]/5 hover:text-[#EB5B3C] shrink-0 gap-1.5"
+   481→                    >
+   482→                      {loggingOutSessionId === session.id ? (
+   483→                        <Loader2 className="size-3.5 animate-spin" />
+   484→                      ) : (
+   485→                        <LogOut className="size-3.5" />
+   486→                      )}
+   487→                      <span className="hidden sm:inline">Logout</span>
+   488→                    </Button>
+   489→                  </div>
+   490→
+   491→                  {/* Expandable Details */}
+   492→                  <div className="mt-3 pt-3 border-t border-border/50">
+   493→                    <button
+   494→                      onClick={() => setExpandedSession(expandedSession === session.id ? null : session.id)}
+   495→                      className="flex items-center gap-1.5 text-xs font-semibold text-[#5367ff] hover:text-[#4356e0] transition-colors"
+   496→                    >
+   497→                      {expandedSession === session.id ? 'Hide' : 'View'} Details
+   498→                      <ChevronRight className={cn(
+   499→                        "size-3 transition-transform",
+   500→                        expandedSession === session.id && "rotate-90"
+   501→                      )} />
+   502→                    </button>
+   503→                    {expandedSession === session.id && (
+   504→                      <motion.div
+   505→                        initial={{ opacity: 0, height: 0 }}
+   506→                        animate={{ opacity: 1, height: 'auto' }}
+   507→                        className="mt-3 space-y-2"
+   508→                      >
+   509→                        <DetailRow icon={Fingerprint} label="Session ID" value={session.id.slice(0, 16) + '...'} />
+   510→                        <DetailRow icon={KeyRound} label="Browser" value={session.browser} />
+   511→                        <DetailRow icon={Monitor} label="Device Type" value={session.deviceType} />
+   512→                        <DetailRow icon={Globe} label="IP Address" value={session.ipAddress?.split(',')[0].trim() || 'N/A'} />
+   513→                        <DetailRow icon={MapPin} label="Location" value={session.location || 'Unknown'} />
+   514→                        <DetailRow icon={Clock} label="Login Time" value={formatFullDate(session.createdAt)} />
+   515→                        <DetailRow icon={Shield} label="Session Expires" value={formatExpiry(session.expiresAt)} />
+   516→                        <div className="pt-2">
+   517→                          <Button
+   518→                            variant="outline"
+   519→                            size="sm"
+   520→                            disabled={loggingOutSessionId === session.id}
+   521→                            onClick={() => handleLogoutSession(session.id)}
+   522→                            className="w-full text-xs font-semibold text-[#EB5B3C] border-[#eb5b3c]/20 hover:bg-[#EB5B3C]/5"
+   523→                          >
+   524→                            {loggingOutSessionId === session.id ? (
+   525→                              <><Loader2 className="size-3.5 mr-1.5 animate-spin" />Logging out...</>
+   526→                            ) : (
+   527→                              <><LogOut className="size-3.5 mr-1.5" />Logout from this device</>
+   528→                            )}
+   529→                          </Button>
+   530→                        </div>
+   531→                      </motion.div>
+   532→                    )}
+   533→                  </div>
+   534→                </div>
+   535→              </div>
+   536→            </motion.div>
+   537→          ))}
+   538→
+   539→          {/* ── No Other Devices ──────────────────────────────── */}
+   540→          {!sessionsLoading && otherSessions.length === 0 && currentSession && (
+   541→            <motion.div custom={si++} variants={fadeInUp} initial="hidden" animate="visible">
+   542→              <div className="bg-card border border-border rounded-2xl p-8 text-center">
+   543→                <div className="size-14 rounded-full bg-[#e6faf4] flex items-center justify-center mx-auto mb-3">
+   544→                  <Shield className="size-7 text-[#00D09C]" />
+   545→                </div>
+   546→                <p className="text-sm font-semibold text-foreground">Only this device is active</p>
+   547→                <p className="text-xs text-muted-foreground mt-1">
+   548→                  No other devices are logged into your account. Your account is secure.
+   549→                </p>
+   550→              </div>
+   551→            </motion.div>
+   552→          )}
+   553→        </div>
+   554→      )}
+   555→
+   556→      {/* ── Logout All Confirmation Dialog ──────────────────── */}
+   557→      <Dialog open={logoutAllConfirmOpen} onOpenChange={setLogoutAllConfirmOpen}>
+   558→        <DialogContent className="sm:max-w-md">
+   559→          <DialogHeader>
+   560→            <DialogTitle className="flex items-center gap-2 text-foreground">
+   561→              <AlertTriangle className="size-5 text-[#EB5B3C]" />
+   562→              Logout All Devices?
+   563→            </DialogTitle>
+   564→            <DialogDescription className="text-muted-foreground">
+   565→              This will logout all devices except your current one. You&apos;ll need to login again on those devices.
+   566→              <span className="block mt-1 font-medium text-foreground">{otherSessions.length} device{otherSessions.length !== 1 ? 's' : ''} will be logged out.</span>
+   567→            </DialogDescription>
+   568→          </DialogHeader>
+   569→          <DialogFooter className="gap-2 sm:gap-0">
+   570→            <Button
+   571→              variant="outline"
+   572→              onClick={() => setLogoutAllConfirmOpen(false)}
+   573→              className="border-border"
+   574→            >
+   575→              Cancel
+   576→            </Button>
+   577→            <Button
+   578→              onClick={handleLogoutAll}
+   579→              disabled={logoutAllSubmitting}
+   580→              className="bg-[#EB5B3C] hover:bg-[#d94f33] text-white gap-1.5"
+   581→            >
+   582→              {logoutAllSubmitting ? (
+   583→                <><Loader2 className="size-4 animate-spin" />Logging out...</>
+   584→              ) : (
+   585→                <><LogOut className="size-4" />Logout All</>
+   586→              )}
+   587→            </Button>
+   588→          </DialogFooter>
+   589→        </DialogContent>
+   590→      </Dialog>
+   591→    </div>
+   592→  )
+   593→}
+   594→
+   595→// ─── Detail Row Component ────────────────────────────────────────
+   596→
+   597→function DetailRow({ icon: Icon, label, value }: { icon: React.ComponentType<{ className?: string }>; label: string; value: string }) {
+   598→  return (
+   599→    <div className="flex items-center gap-2.5 py-1.5 px-3 rounded-lg bg-card">
+   600→      <Icon className="size-3.5 text-muted-foreground shrink-0" />
+   601→      <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider min-w-[90px]">{label}</span>
+   602→      <span className="text-xs font-medium text-foreground truncate">{value}</span>
+   603→    </div>
+   604→  )
+   605→}
+   606→

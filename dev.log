@@ -1,0 +1,73 @@
+▲ Next.js 16.1.3 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://21.0.11.148:3000
+- Environments: .env.local, .env
+
+✓ Starting...
+✓ Ready in 1020ms
+○ Compiling / ...
+ GET /?screenshot=true&page=profile 200 in 7.4s (compile: 7.0s, render: 391ms)
+prisma:error 
+Invalid `__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["db"].marketHoliday.findMany()` invocation in
+/home/z/my-project/.next/dev/server/chunks/[root-of-the-server]__f76295d0._.js:112:167
+
+  109 const currentYear = new Date().getFullYear();
+  110 const yearStart = new Date(`${currentYear}-01-01`);
+  111 const yearEnd = new Date(`${currentYear}-12-31`);
+→ 112 const holidays = await __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["db"].marketHoliday.findMany(
+
+[API /market/holidays] Error: Error [PrismaClientKnownRequestError]: 
+Invalid `__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["db"].marketHoliday.findMany()` invocation in
+/home/z/my-project/.next/dev/server/chunks/[root-of-the-server]__f76295d0._.js:112:167
+
+  109 const currentYear = new Date().getFullYear();
+  110 const yearStart = new Date(`${currentYear}-01-01`);
+  111 const yearEnd = new Date(`${currentYear}-12-31`);
+→ 112 const holidays = await __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["db"].marketHoliday.findMany(
+
+    at <unknown> (src/app/api/market/holidays/route.ts:14:45)
+    at async GET (src/app/api/market/holidays/route.ts:14:22)
+  12 |     const yearEnd = new Date(`${currentYear}-12-31`)
+  13 |
+> 14 |     const holidays = await db.marketHoliday.findMany({
+     |                                             ^
+  15 |       where: {
+  16 |         date: {
+  17 |           gte: yearStart, {
+  code: 'ECONNREFUSED',
+  meta: [Object],
+  clientVersion: '6.19.2'
+}
+ GET /api/market/holidays 500 in 462ms (compile: 211ms, render: 251ms)
+prisma:error 
+Invalid `__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["db"].index.findMany()` invocation in
+/home/z/my-project/.next/dev/server/chunks/[root-of-the-server]__643655a5._.js:2172:158
+
+  2169     return __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$server$2e$js__$5b$app$2d$route$5d$__$28$ecmascript$29$__["NextResponse"].json(cached);
+  2170 }
+  2171 // 1. Get base data from database
+→ 2172 const indices = await __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["db"].index.findMany(
+
+[API /indices] Error: Error [PrismaClientKnownRequestError]: 
+Invalid `__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["db"].index.findMany()` invocation in
+/home/z/my-project/.next/dev/server/chunks/[root-of-the-server]__643655a5._.js:2172:158
+
+  2169     return __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$server$2e$js__$5b$app$2d$route$5d$__$28$ecmascript$29$__["NextResponse"].json(cached);
+  2170 }
+  2171 // 1. Get base data from database
+→ 2172 const indices = await __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["db"].index.findMany(
+
+    at <unknown> (src/app/api/indices/route.ts:27:36)
+    at async GET (src/app/api/indices/route.ts:27:21)
+  25 |
+  26 |     // 1. Get base data from database
+> 27 |     const indices = await db.index.findMany({
+     |                                    ^
+  28 |       where: { isEnabled: true },
+  29 |       orderBy: { symbol: 'asc' },
+  30 |     }) {
+  code: 'ECONNREFUSED',
+  meta: [Object],
+  clientVersion: '6.19.2'
+}
+ GET /api/indices 500 in 637ms (compile: 264ms, render: 373ms)

@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NEXTTRADE V1 - Complete Screenshots Collection</title>
+    <style>
+        @page {
+            size: A4 landscape;
+            margin: 10mm;
+        }
+        
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #0a0a0a;
+            color: #ffffff;
+            line-height: 1.6;
+        }
+        
+        /* Cover Page */
+        .cover {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background: linear-gradient(135deg, #112E81 0%, #4647AE 50%, #4382DF 100%);
+            padding: 40px;
+            text-align: center;
+            page-break-after: always;
+        }
+        
+        .cover-logo {
+            font-size: 72px;
+            font-weight: 900;
+            letter-spacing: 8px;
+            margin-bottom: 20px;
+            color: #fff;
+            text-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+        
+        .cover-subtitle {
+            font-size: 24px;
+            font-weight: 300;
+            opacity: 0.9;
+            margin-bottom: 40px;
+        }
+        
+        .cover-info {
+            font-size: 16px;
+            opacity: 0.8;
+            max-width: 600px;
+        }
+        
+        .cover-badge {
+            display: inline-block;
+            background: rgba(255,255,255,0.2);
+            padding: 12px 30px;
+            border-radius: 30px;
+            font-size: 14px;
+            margin-top: 30px;
+            backdrop-filter: blur(10px);
+        }
+        
+        /* Section Headers */
+        .section {
+            page-break-before: always;
+        }
+        
+        .section-header {
+            background: linear-gradient(90deg, #112E81 0%, #4647AE 100%);
+            padding: 30px 40px;
+            text-align: center;
+        }
+        
+        .section-header h2 {
+            font-size: 36px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        
+        .section-header p {
+            font-size: 16px;
+            opacity: 0.85;
+        }
+        
+        /* Theme Colors */
+        .dark-theme .section-header {
+            background: linear-gradient(90deg, #1a1a2e 0%, #16213e 100%);
+        }
+        
+        .light-theme .section-header {
+            background: linear-gradient(90deg, #f8fafc 0%, #e2e8f0 100%);
+            color: #1a1a2e;
+        }
+        
+        .ocean-theme .section-header {
+            background: linear-gradient(90deg, #112E81 0%, #AACCD6 100%);
+        }
+        
+        /* Screenshot Grid */
+        .screenshots-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 30px;
+            padding: 30px;
+            background: #111;
+        }
+        
+        .screenshot-item {
+            background: #1a1a2e;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            break-inside: avoid;
+        }
+        
+        .light-theme .screenshots-grid {
+            background: #f1f5f9;
+        }
+        
+        .light-theme .screenshot-item {
+            background: #fff;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+        
+        .ocean-theme .screenshots-grid {
+            background: #0d2137;
+        }
+        
+        .ocean-theme .screenshot-item {
+            background: #112E51;
+            border: 1px solid #4647AE;
+        }
+        
+        .screenshot-label {
+            padding: 15px 20px;
+            font-weight: 600;
+            font-size: 14px;
+            background: rgba(255,255,255,0.05);
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .light-theme .screenshot-label {
+            background: #f8fafc;
+            border-bottom: 1px solid #e2e8f0;
+            color: #334155;
+        }
+        
+        .page-number {
+            background: #4382DF;
+            color: white;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: 700;
+        }
+        
+        .screenshot-img {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+        
+        /* Table of Contents */
+        .toc {
+            padding: 40px;
+            page-break-after: always;
+        }
+        
+        .toc h2 {
+            font-size: 32px;
+            margin-bottom: 30px;
+            text-align: center;
+            color: #4382DF;
+        }
+        
+        .toc-section {
+            margin-bottom: 35px;
+        }
+        
+        .toc-section h3 {
+            font-size: 20px;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #4647AE;
+            color: #AACCD6;
+        }
+        
+        .toc-list {
+            list-style: none;
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+        }
+        
+        .toc-list li {
+            padding: 8px 15px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 6px;
+            font-size: 14px;
+        }
+        
+        .toc-list li::before {
+            content: "📄";
+            margin-right: 10px;
+        }
+        
+        /* Footer */
+        .footer {
+            text-align: center;
+            padding: 30px;
+            background: #0a0a0a;
+            color: #666;
+            font-size: 12px;
+            border-top: 1px solid #222;
+        }
+    </style>
+</head>
+<body>
+    <!-- Cover Page -->
+    <div class="cover">
+        <div class="cover-logo">NEXTTRADE V1</div>
+        <div class="cover-subtitle">Complete Website Screenshots Collection</div>
+        <div class="cover-info">
+            A comprehensive visual documentation of all pages in Dark Mode, Light Mode, and Ocean Mode themes.
+            This document showcases the complete NEXTTRADE paper trading platform interface.
+        </div>
+        <div class="cover-badge">📸 63+ Screenshots | 3 Theme Modes | 26+ Pages</div>
+    </div>
+
+    <!-- Table of Contents -->
+    <div class="toc">
+        <h2>Table of Contents</h2>
+        
+        <div class="toc-section">
+            <h3>🌙 Dark Mode Screenshots (27 Pages)</h3>
+            <ul class="toc-list">
+                <li>01 - Dashboard / Homepage</li>
+                <li>02 - Trading Terminal</li>
+                <li>03 - Stock Overview</li>
+                <li>04 - Positions</li>
+                <li>05 - Orders</li>
+                <li>06 - Portfolio</li>
+                <li>07 - Reports & Analytics</li>
+                <li>08 - Option Chain</li>
+                <li>09 - Futures & Commodities</li>
+                <li>10 - Learning Center</li>
+                <li>11 - Watchlist</li>
+                <li>12 - Profile Settings</li>
+                <li>13 - App Settings</li>
+                <li>14 - Trading Challenges</li>
+                <li>15 - Leaderboard</li>
+                <li>16 - Analytics Dashboard</li>
+                <li>17 - Help & Support</li>
+                <li>18 - Active Devices</li>
+                <li>19 - About Us</li>
+                <li>20 - Privacy Policy</li>
+                <li>21 - Terms of Service</li>
+                <li>22 - FAQ</li>
+                <li>23 - Contact Us</li>
+                <li>24 - Disclaimer</li>
+                <li>25 - Refund Policy</li>
+                <li>26 - Support Page</li>
+            </ul>
+        </div>
+        
+        <div class="toc-section">
+            <h3>☀️ Light Mode Screenshots (26 Pages)</h3>
+            <ul class="toc-list">
+                <li>01 - Dashboard</li>
+                <li>02 - Trading Terminal</li>
+                <li>03 - Stock Overview</li>
+                <li>04 - Positions</li>
+                <li>05 - Orders</li>
+                <li>06 - Portfolio</li>
+                <li>07 - Reports</li>
+                <li>08 - Option Chain</li>
+                <li>09 - Futures</li>
+                <li>10 - Learning</li>
+                <li>11 - Watchlist</li>
+                <li>12 - Profile</li>
+                <li>13 - Settings</li>
+                <li>14 - Challenges</li>
+                <li>15 - Leaderboard</li>
+                <li>16 - Analytics</li>
+                <li>17 - Help Support</li>
+                <li>18 - Active Devices</li>
+                <li>19 - About Us</li>
+                <li>20-26 - Legal Pages</li>
+            </ul>
+        </div>
+        
+        <div class="toc-section">
+            <h3>🌊 Ocean Mode Screenshots (10 Pages)</h3>
+            <ul class="toc-list">
+                <li>01 - Dashboard</li>
+                <li>02 - Trading Terminal</li>
+                <li>03 - Stock Overview</li>
+                <li>04 - Positions</li>
+                <li>05 - Orders</li>
+                <li>06 - Portfolio</li>
+                <li>07 - Reports</li>
+                <li>08 - Option Chain</li>
+                <li>09 - Futures</li>
+                <li>10 - Learning</li>
+            </ul>
+        </div>
+    </div>
+
+    <!-- Dark Mode Section -->
+    <div class="section dark-theme">
+        <div class="section-header">
+            <h2>🌙 DARK MODE</h2>
+            <p>Complete Dark Theme Interface - All Pages</p>
+        </div>
+        <div class="screenshots-grid">
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">01</span> Dashboard / Homepage</div>
+                <img src="dark/01-homepage.png" alt="Homepage" class="screenshot-img" onerror="this.src='dark/01-dashboard.png'">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">02</span> Trading Terminal</div>
+                <img src="dark/02-trading.png" alt="Trading" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">03</span> Stock Overview</div>
+                <img src="dark/03-stock-overview.png" alt="Stock Overview" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">04</span> Positions</div>
+                <img src="dark/04-positions.png" alt="Positions" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">05</span> Orders</div>
+                <img src="dark/05-orders.png" alt="Orders" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">06</span> Portfolio</div>
+                <img src="dark/06-portfolio.png" alt="Portfolio" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">07</span> Reports</div>
+                <img src="dark/07-reports.png" alt="Reports" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">08</span> Option Chain</div>
+                <img src="dark/08-option-chain.png" alt="Option Chain" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">09</span> Futures</div>
+                <img src="dark/09-futures.png" alt="Futures" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">10</span> Learning Center</div>
+                <img src="dark/10-learning.png" alt="Learning" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">11</span> Watchlist</div>
+                <img src="dark/11-watchlist.png" alt="Watchlist" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">12</span> Profile</div>
+                <img src="dark/12-profile.png" alt="Profile" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">13</span> Settings</div>
+                <img src="dark/13-settings.png" alt="Settings" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">14</span> Challenges</div>
+                <img src="dark/14-challenges.png" alt="Challenges" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">15</span> Leaderboard</div>
+                <img src="dark/15-leaderboard.png" alt="Leaderboard" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">16</span> Analytics</div>
+                <img src="dark/16-analytics.png" alt="Analytics" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">17</span> Help & Support</div>
+                <img src="dark/17-help-support.png" alt="Help Support" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">18</span> Active Devices</div>
+                <img src="dark/18-active-devices.png" alt="Active Devices" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">19</span> About Us</div>
+                <img src="dark/19-about-us.png" alt="About Us" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">20</span> Privacy Policy</div>
+                <img src="dark/20-privacy-policy.png" alt="Privacy Policy" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">21</span> Terms of Service</div>
+                <img src="dark/21-terms-of-service.png" alt="Terms of Service" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">22</span> FAQ</div>
+                <img src="dark/22-faq.png" alt="FAQ" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">23</span> Contact Us</div>
+                <img src="dark/23-contact-us.png" alt="Contact Us" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">24</span> Disclaimer</div>
+                <img src="dark/24-disclaimer.png" alt="Disclaimer" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">25</span> Refund Policy</div>
+                <img src="dark/25-refund-policy.png" alt="Refund Policy" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">26</span> Support</div>
+                <img src="dark/26-support.png" alt="Support" class="screenshot-img">
+            </div>
+        </div>
+    </div>
+
+    <!-- Light Mode Section -->
+    <div class="section light-theme">
+        <div class="section-header">
+            <h2>☀️ LIGHT MODE</h2>
+            <p>Complete Light Theme Interface - All Pages</p>
+        </div>
+        <div class="screenshots-grid">
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">01</span> Dashboard</div>
+                <img src="light/01-dashboard.png" alt="Dashboard" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">02</span> Trading Terminal</div>
+                <img src="light/02-trading.png" alt="Trading" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">03</span> Stock Overview</div>
+                <img src="light/03-stock-overview.png" alt="Stock Overview" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">04</span> Positions</div>
+                <img src="light/04-positions.png" alt="Positions" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">05</span> Orders</div>
+                <img src="light/05-orders.png" alt="Orders" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">06</span> Portfolio</div>
+                <img src="light/06-portfolio.png" alt="Portfolio" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">07</span> Reports</div>
+                <img src="light/07-reports.png" alt="Reports" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">08</span> Option Chain</div>
+                <img src="light/08-option-chain.png" alt="Option Chain" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">09</span> Futures</div>
+                <img src="light/09-futures.png" alt="Futures" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">10</span> Learning Center</div>
+                <img src="light/10-learning.png" alt="Learning" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">11</span> Watchlist</div>
+                <img src="light/11-watchlist.png" alt="Watchlist" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">12</span> Profile</div>
+                <img src="light/12-profile.png" alt="Profile" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">13</span> Settings</div>
+                <img src="light/13-settings.png" alt="Settings" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">14</span> Challenges</div>
+                <img src="light/14-challenges.png" alt="Challenges" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">15</span> Leaderboard</div>
+                <img src="light/15-leaderboard.png" alt="Leaderboard" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">16</span> Analytics</div>
+                <img src="light/16-analytics.png" alt="Analytics" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">17</span> Help & Support</div>
+                <img src="light/17-help-support.png" alt="Help Support" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">18</span> Active Devices</div>
+                <img src="light/18-active-devices.png" alt="Active Devices" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">19</span> About Us</div>
+                <img src="light/19-about-us.png" alt="About Us" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">20</span> Privacy Policy</div>
+                <img src="light/20-privacy-policy.png" alt="Privacy Policy" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">21</span> Terms of Service</div>
+                <img src="light/21-terms-of-service.png" alt="Terms of Service" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">22</span> FAQ</div>
+                <img src="light/22-faq.png" alt="FAQ" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">23</span> Contact Us</div>
+                <img src="light/23-contact-us.png" alt="Contact Us" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">24</span> Disclaimer</div>
+                <img src="light/24-disclaimer.png" alt="Disclaimer" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">25</span> Refund Policy</div>
+                <img src="light/25-refund-policy.png" alt="Refund Policy" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">26</span> Support</div>
+                <img src="light/26-support.png" alt="Support" class="screenshot-img">
+            </div>
+        </div>
+    </div>
+
+    <!-- Ocean Mode Section -->
+    <div class="section ocean-theme">
+        <div class="section-header">
+            <h2>🌊 OCEAN MODE</h2>
+            <p>NEXTTRADE Exclusive Ocean Theme Interface</p>
+        </div>
+        <div class="screenshots-grid">
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">01</span> Dashboard</div>
+                <img src="ocean/01-dashboard.png" alt="Dashboard" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">02</span> Trading Terminal</div>
+                <img src="ocean/02-trading.png" alt="Trading" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">03</span> Stock Overview</div>
+                <img src="ocean/03-stock-overview.png" alt="Stock Overview" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">04</span> Positions</div>
+                <img src="ocean/04-positions.png" alt="Positions" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">05</span> Orders</div>
+                <img src="ocean/05-orders.png" alt="Orders" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">06</span> Portfolio</div>
+                <img src="ocean/06-portfolio.png" alt="Portfolio" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">07</span> Reports</div>
+                <img src="ocean/07-reports.png" alt="Reports" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">08</span> Option Chain</div>
+                <img src="ocean/08-option-chain.png" alt="Option Chain" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">09</span> Futures</div>
+                <img src="ocean/09-futures.png" alt="Futures" class="screenshot-img">
+            </div>
+            <div class="screenshot-item">
+                <div class="screenshot-label"><span class="page-number">10</span> Learning Center</div>
+                <img src="ocean/10-learning.png" alt="Learning" class="screenshot-img">
+            </div>
+        </div>
+    </div>
+
+    <!-- Back Cover -->
+    <div class="cover" style="background: linear-gradient(135deg, #4382DF 0%, #AACCD6 100%);">
+        <div style="font-size: 48px; margin-bottom: 20px;">🚀</div>
+        <div class="cover-logo" style="font-size: 48px;">NEXTTRADE V1</div>
+        <div class="cover-subtitle" style="font-size: 18px;">Master Indian Markets Before You Invest</div>
+        <div class="cover-info">
+            Generated on $(date '+%B %d, %Y')<br>
+            Color Palette: Navy (#112E81) | Purple (#4647AE) | Ocean Blue (#4382DF) | Ice Blue (#AACCD6)
+        </div>
+    </div>
+</body>
+</html>
